@@ -108,9 +108,7 @@ function renderMeetingItem(m) {
 async function loadConfig() {
   const { config } = await chrome.storage.local.get("config");
   const cfg = config || {};
-  if (!cfg.webhookUrl) {
-    els.webhookStatus.classList.remove("hidden");
-  }
+  els.webhookStatus.classList.toggle("hidden", !!cfg.webhookUrl);
 }
 
 async function loadQueue() {
