@@ -202,6 +202,21 @@ async function postWebhook(vConDoc, cfg, deliveryKind) {
   if (!/^https:\/\//i.test(cfg.webhookUrl)) {
     return { ok: false, error: "Webhook URL must use HTTPS" };
   }
+  let host;
+  try {
+    host = new URL(cfg.webhookUrl).hostname;
+  } catch {
+    return { ok: false, error: "Invalid webhook URL" };
+  }
+  const has = await chrome.permissions.contains({
+    origins: [`https://${host}/*`],
+  });
+  if (!has) {
+    return {
+      ok: false,
+      error: `No host permission for ${host}. Open MeetVcon options and re-save the webhook URL to grant access.`,
+    };
+  }
   const body = JSON.stringify(vConDoc);
   const headers = {
     "Content-Type": "application/vcon+json",

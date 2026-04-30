@@ -69,12 +69,44 @@ function setStatus(msg, kind) {
   els.status.className = kind || "";
 }
 
+// Build the host pattern for chrome.permissions from a URL.
+// e.g. https://webhook.site/abc → https://webhook.site/*
+function originPatternFor(url) {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.hostname}/*`;
+  } catch {
+    return null;
+  }
+}
+
+// Returns true if permission is already granted or was granted just now.
+// Must be called inside a user-gesture handler (click) for request() to succeed.
+async function ensurePermission(url) {
+  const pattern = originPatternFor(url);
+  if (!pattern) return false;
+  const has = await chrome.permissions.contains({ origins: [pattern] });
+  if (has) return true;
+  return await chrome.permissions.request({ origins: [pattern] });
+}
+
 async function save(e) {
   e.preventDefault();
   const cfg = readForm();
   if (cfg.webhookUrl && !/^https:\/\//i.test(cfg.webhookUrl)) {
     setStatus("Webhook URL must start with https://", "error");
     return;
+  }
+  if (cfg.webhookUrl) {
+    const granted = await ensurePermission(cfg.webhookUrl);
+    if (!granted) {
+      await chrome.storage.local.set({ config: cfg });
+      setStatus(
+        "Saved, but permission was denied. Click Save again to retry — delivery will fail until you grant access.",
+        "error"
+      );
+      return;
+    }
   }
   await chrome.storage.local.set({ config: cfg });
   setStatus("Saved.", "ok");
@@ -90,6 +122,11 @@ async function sendTest() {
   }
   if (!/^https:\/\//i.test(cfg.webhookUrl)) {
     setStatus("Webhook URL must start with https://", "error");
+    return;
+  }
+  const granted = await ensurePermission(cfg.webhookUrl);
+  if (!granted) {
+    setStatus("Permission denied for that webhook host.", "error");
     return;
   }
   await chrome.storage.local.set({ config: cfg });

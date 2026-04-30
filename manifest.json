@@ -13,7 +13,10 @@
   ],
 
   "host_permissions": [
-    "https://meet.google.com/*",
+    "https://meet.google.com/*"
+  ],
+
+  "optional_host_permissions": [
     "https://*/*"
   ],
 
