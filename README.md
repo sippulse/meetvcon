@@ -111,7 +111,7 @@ Conforms to `draft-ietf-vcon-vcon-container`. Minimum example:
 }
 ```
 
-## Webhook receiver — minimal example
+## Webhook receiver: minimal example
 
 Any HTTPS endpoint will work. A throwaway Node.js receiver for testing:
 
@@ -201,7 +201,7 @@ participant consent where required.
 ## Contributing
 
 Issues and PRs welcome. The most common breakage is a Google Meet DOM
-change — if captions stop being captured, look first at
+change. If captions stop being captured, look first at
 `src/lib/selectors.js`.
 
 For security issues, email **security@sippulse.com** instead of opening
@@ -209,4 +209,4 @@ a public issue.
 
 ## License
 
-[MIT](./LICENSE) © 2026 Sippulse.
+[MIT](./LICENSE) © 2026 SipPulse.

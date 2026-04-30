@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>MeetVcon — Options</title>
+  <title>MeetVcon Options</title>
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
@@ -43,12 +43,12 @@
 
         <label class="radio">
           <input type="radio" name="deliveryMode" id="modeEnd" value="end_of_call" />
-          <span><strong>End of call</strong> — one POST when the meeting ends. Simplest. Risk: data lost if the tab crashes mid-call.</span>
+          <span><strong>End of call</strong>. One POST when the meeting ends. Simplest. Risk: data lost if the tab crashes mid-call.</span>
         </label>
 
         <label class="radio">
           <input type="radio" name="deliveryMode" id="modeSnap" value="periodic_snapshot" />
-          <span><strong>Periodic snapshot</strong> — every N minutes during the call, POST a cumulative snapshot. Same vCon UUID across snapshots; receiver upserts. Final POST at end-of-call carries header <code>X-MeetVcon-Delivery: final</code>.</span>
+          <span><strong>Periodic snapshot</strong>. Every N minutes during the call, POST a cumulative snapshot. Same vCon UUID across snapshots; receiver upserts. Final POST at end-of-call carries header <code>X-MeetVcon-Delivery: final</code>.</span>
         </label>
 
         <label id="intervalLabel">
@@ -65,7 +65,7 @@
           <input type="checkbox" id="includeCapturerEmail" />
           <span>
             Include my Chrome profile email as the capturer
-            (<code>attachments[].body.captured_by_user.email</code>) — on by default.
+            (<code>attachments[].body.captured_by_user.email</code>). On by default.
             Identifies which user ran the extension; useful for routing transcripts
             in your receiver. Turn off for anonymized capture.
           </span>

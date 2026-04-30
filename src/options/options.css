@@ -24,7 +24,7 @@ h1 {
 }
 
 a {
-  color: #1a73e8;
+  color: #006eb7;
 }
 
 fieldset {
@@ -80,8 +80,8 @@ input[type="password"]:focus,
 input[type="text"]:focus,
 input[type="number"]:focus {
   outline: none;
-  border-color: #1a73e8;
-  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
+  border-color: #006eb7;
+  box-shadow: 0 0 0 2px rgba(0, 110, 183, 0.15);
 }
 
 label.radio,
@@ -111,7 +111,7 @@ code {
 }
 
 button {
-  background: #1a73e8;
+  background: #006eb7;
   color: white;
   border: 0;
   border-radius: 4px;
@@ -122,13 +122,13 @@ button {
 }
 
 button:hover {
-  background: #1765cc;
+  background: #005a96;
 }
 
 button[type="button"] {
   background: white;
-  color: #1a73e8;
-  border: 1px solid #1a73e8;
+  color: #006eb7;
+  border: 1px solid #006eb7;
 }
 
 button[type="button"]:hover {

@@ -102,7 +102,7 @@ async function save(e) {
     if (!granted) {
       await chrome.storage.local.set({ config: cfg });
       setStatus(
-        "Saved, but permission was denied. Click Save again to retry — delivery will fail until you grant access.",
+        "Saved, but permission was denied. Click Save again to retry. Delivery will fail until you grant access.",
         "error"
       );
       return;

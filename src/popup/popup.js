@@ -83,7 +83,7 @@ function renderMeetingItem(m) {
   const iconChar =
     status === "delivered" ? "✓" :
     status === "queued"    ? "⟳" :
-    status === "skipped_no_captions" ? "—" :
+    status === "skipped_no_captions" ? "·" :
     status === "failed"    ? "✕" : "·";
 
   const dur = fmtDuration(m.startedAt, m.endedAt);
