@@ -1,0 +1,171 @@
+body {
+  width: 360px;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  color: #202124;
+  background: #fff;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e8eaed;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+a {
+  color: #1a73e8;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.section {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f3f4;
+}
+
+.section:last-child {
+  border-bottom: 0;
+}
+
+.section h2 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5f6368;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.count {
+  background: #e8f0fe;
+  color: #1967d2;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list li {
+  padding: 8px 0;
+  border-top: 1px solid #f1f3f4;
+}
+
+.list li:first-child {
+  border-top: 0;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.title {
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  font-size: 11px;
+  color: #5f6368;
+  white-space: nowrap;
+}
+
+.detail {
+  font-size: 12px;
+  color: #5f6368;
+  margin-top: 2px;
+}
+
+.detail .err {
+  color: #c5221f;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.actions button {
+  background: #fff;
+  color: #1a73e8;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.actions button:hover {
+  background: #f1f3f4;
+}
+
+.actions button.danger {
+  color: #c5221f;
+}
+
+.empty {
+  color: #5f6368;
+  font-size: 12px;
+  margin: 4px 0 0 0;
+  font-style: italic;
+}
+
+.hidden {
+  display: none;
+}
+
+.webhook-status {
+  padding: 10px 14px;
+  background: #fef7e0;
+  border-bottom: 1px solid #f9c846;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.webhook-status .warn {
+  color: #5f6368;
+}
+
+.status-icon {
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.status-icon.ok    { color: #188038; }
+.status-icon.queue { color: #ea8600; }
+.status-icon.skip  { color: #5f6368; }
+.status-icon.fail  { color: #c5221f; }

@@ -1,0 +1,33 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node (in case any tooling lands later)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Build output (none today, reserved)
+dist/
+build/
+*.zip
+*.crx
+*.pem
+
+# Local secrets — must NEVER be committed
+.env
+.env.*
+*.local
+secrets/
+
+# Logs
+*.log
+
+# Chrome profile if anyone runs a dev profile from inside the repo
+chrome-profile/

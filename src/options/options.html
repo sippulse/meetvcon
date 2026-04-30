@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MeetVcon — Options</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <h1>MeetVcon</h1>
+    <p class="intro">
+      MeetVcon transcribes your Google Meet calls using the browser's built-in
+      captions and POSTs the transcript as a
+      <a href="https://datatracker.ietf.org/wg/vcon/about/" target="_blank" rel="noreferrer">vCon</a>
+      JSON document to the webhook below.
+    </p>
+
+    <form id="form">
+      <fieldset>
+        <legend>Webhook</legend>
+
+        <label>
+          <span class="lbl">Webhook URL <span class="req">*</span></span>
+          <input type="url" id="webhookUrl" placeholder="https://your.server/webhook" required />
+          <span class="hint">Must use HTTPS. The transcript is POSTed as <code>application/vcon+json</code>.</span>
+        </label>
+
+        <label>
+          <span class="lbl">Bearer token (optional)</span>
+          <input type="password" id="bearerToken" autocomplete="off" placeholder="" />
+          <span class="hint">Sent as <code>Authorization: Bearer &lt;token&gt;</code>.</span>
+        </label>
+
+        <label>
+          <span class="lbl">HMAC signing secret (optional)</span>
+          <input type="password" id="hmacSecret" autocomplete="off" placeholder="" />
+          <span class="hint">If set, payloads are signed: <code>X-MeetVcon-Signature: sha256=&lt;hex&gt;</code> (HMAC-SHA256 over the raw body).</span>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Delivery mode</legend>
+
+        <label class="radio">
+          <input type="radio" name="deliveryMode" id="modeEnd" value="end_of_call" />
+          <span><strong>End of call</strong> — one POST when the meeting ends. Simplest. Risk: data lost if the tab crashes mid-call.</span>
+        </label>
+
+        <label class="radio">
+          <input type="radio" name="deliveryMode" id="modeSnap" value="periodic_snapshot" />
+          <span><strong>Periodic snapshot</strong> — every N minutes during the call, POST a cumulative snapshot. Same vCon UUID across snapshots; receiver upserts. Final POST at end-of-call carries header <code>X-MeetVcon-Delivery: final</code>.</span>
+        </label>
+
+        <label id="intervalLabel">
+          <span class="lbl">Snapshot interval (minutes)</span>
+          <input type="number" id="snapshotIntervalMin" min="1" max="60" step="1" />
+          <span class="hint">Valid range 1–60. Default 5.</span>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Privacy</legend>
+
+        <label class="checkbox">
+          <input type="checkbox" id="includeCapturerEmail" />
+          <span>
+            Include my Chrome profile email as the capturer
+            (<code>attachments[].body.captured_by_user.email</code>) — on by default.
+            Identifies which user ran the extension; useful for routing transcripts
+            in your receiver. Turn off for anonymized capture.
+          </span>
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" id="includeSpeakerEmail" />
+          <span>Include other speakers' emails in vCon when Meet exposes them (off by default)</span>
+        </label>
+      </fieldset>
+
+      <div class="actions">
+        <button type="submit" id="save">Save</button>
+        <button type="button" id="test">Send test payload</button>
+        <span id="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
