@@ -98,8 +98,8 @@ Statements required by the Chrome Web Store:
 3. Popup with one delivered meeting and one queued retry, showing Retry / Download / Discard actions.
 4. Optional. A receiver tab showing the incoming vCon JSON (e.g. webhook.site).
 
-## Privacy policy URL (must be publicly hosted before submission)
+## Privacy policy URL
 
-Suggested location: https://www.sippulse.com/meetvcon/privacy
+https://www.sippulse.com/politica-de-privacidade
 
-Required content: what is collected (transcript text, capturer email when enabled), where it goes (the user-configured webhook only), what is stored locally (chrome.storage.local config and recent meetings, chrome.storage.session live buffer), what is not done (no third-party servers, no analytics, no selling of data).
+Note: this is the company-wide policy. It covers SipPulse telephony products and the lead-gen forms on the website, not the browser extension specifically. The Chrome Web Store reviewer may flag this and request an addendum or a dedicated MeetVcon privacy section. If that happens, the data-usage statements above (transcript text, capturer email when enabled, local storage only, POSTed to the user's own webhook, no third-party servers) are the content to add.
