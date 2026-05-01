@@ -1,0 +1,12 @@
+{
+  "name": "meetvcon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tooling for the MeetVcon Chrome extension. The extension itself ships as plain Manifest V3 source.",
+  "scripts": {
+    "screenshots": "node tools/screenshot.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1"
+  }
+}

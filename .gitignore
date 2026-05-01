@@ -31,3 +31,9 @@ secrets/
 
 # Chrome profile if anyone runs a dev profile from inside the repo
 chrome-profile/
+
+# Playwright profile created by tools/screenshot.js
+.playwright-profile/
+
+# Raw screenshot intermediates (only the composited 1280x800 PNGs are committed)
+screenshots/_raw/
