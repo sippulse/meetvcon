@@ -22,6 +22,15 @@ const USER_AGENT = `MeetVcon/${VERSION}`;
 // Backoff schedule in minutes. Index = attempt number (0-based).
 const BACKOFF_MIN = [0.5, 2, 10, 60, 360, 1440];
 
+// chrome.storage.session defaults to TRUSTED_CONTEXTS (worker + extension
+// pages only). The content script writes the in-flight meeting record there
+// and the worker reads it back at call_ended / snapshot time — both sides
+// must share access. Widen on every SW startup since the access level is
+// per-session and not persisted across browser restarts.
+chrome.storage.session
+  .setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+  .catch((err) => log.warn("setAccessLevel failed", err));
+
 // ---- lifecycle ------------------------------------------------------
 
 self.addEventListener("install", () => {
