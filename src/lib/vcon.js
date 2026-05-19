@@ -27,7 +27,8 @@
     const seen = new Map(); // name -> index
     const parties = [];
     for (const u of utterances) {
-      const name = u.speaker || "unknown";
+      const name = u.speaker;
+      if (!name || name === "unknown") continue;
       if (!seen.has(name)) {
         seen.set(name, parties.length);
         const party = { name };
@@ -40,11 +41,11 @@
 
   function buildDialog(utterances, speakerToIndex) {
     return utterances.map((u) => {
-      const idx = speakerToIndex.get(u.speaker || "unknown");
+      const idx = speakerToIndex.get(u.speaker);
       const dialog = {
         type: "text",
         start: u.start,
-        parties: [idx],
+        parties: idx !== undefined ? [idx] : [],
         body: u.text || "",
       };
       if (typeof u.duration === "number" && u.duration > 0) {
@@ -101,5 +102,134 @@
     };
   }
 
-  ns.vcon = { uuidv4, assemble };
+  // Render a vCon document as a human-friendly Markdown transcript.
+  // Used by the popup's "Download .md" action.
+  function toMarkdown(doc) {
+    if (!doc) return "";
+    const meta = doc.attachments?.find((a) => a.type === "meeting_metadata")?.body || {};
+    const parties = Array.isArray(doc.parties) ? doc.parties : [];
+    const dialog = Array.isArray(doc.dialog) ? doc.dialog : [];
+
+    const lines = [];
+    const subject = doc.subject || meta.meeting_code || "(no title)";
+    lines.push(`# ${subject}`);
+    lines.push("");
+
+    if (parties.length) {
+      lines.push("## Participants");
+      lines.push("");
+      for (const p of parties) {
+        const label = p.mailto ? `${p.name} (${p.mailto})` : p.name;
+        lines.push(`- ${label}`);
+      }
+      lines.push("");
+    }
+
+    const facts = [];
+    if (meta.meeting_code) facts.push(`- **Meeting code:** ${meta.meeting_code}`);
+    if (meta.meeting_url) facts.push(`- **URL:** ${meta.meeting_url}`);
+    if (doc.created_at) facts.push(`- **Started:** ${doc.created_at}`);
+    const lastDialog = dialog[dialog.length - 1];
+    if (lastDialog?.start) {
+      const endIso = lastDialog.duration
+        ? new Date(Date.parse(lastDialog.start) + lastDialog.duration * 1000).toISOString()
+        : lastDialog.start;
+      facts.push(`- **Ended:** ${endIso}`);
+    }
+    if (meta.platform) facts.push(`- **Platform:** ${meta.platform}`);
+    if (meta.captured_by) facts.push(`- **Captured by:** ${meta.captured_by}`);
+    if (meta.captured_by_user?.email) {
+      facts.push(`- **Capturer:** ${meta.captured_by_user.email}`);
+    }
+    if (meta.delivery_kind) facts.push(`- **Delivery:** ${meta.delivery_kind}`);
+    if (doc.uuid) facts.push(`- **vCon UUID:** ${doc.uuid}`);
+    if (facts.length) {
+      lines.push("## Details");
+      lines.push("");
+      lines.push(...facts, "");
+    }
+
+    lines.push("## Transcript");
+    lines.push("");
+
+    function fmtClock(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d)) return "";
+      return d.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+    }
+
+    let lastSpeakerIdx = -1;
+    for (const d of dialog) {
+      const idx = Array.isArray(d.parties) ? d.parties[0] : null;
+      const speaker = parties[idx]?.name || "unknown";
+      const clock = fmtClock(d.start);
+      const text = (d.body || "").trim();
+      if (!text) continue;
+      if (idx !== lastSpeakerIdx) {
+        if (lastSpeakerIdx !== -1) lines.push("");
+        lines.push(`**${speaker}**${clock ? ` _[${clock}]_` : ""}`);
+        lastSpeakerIdx = idx;
+      }
+      lines.push(text);
+    }
+    lines.push("");
+
+    return lines.join("\n");
+  }
+
+  // Render a vCon as a WebVTT subtitle file. Timestamps are relative to
+  // doc.created_at (the meeting start). Consecutive utterances from the
+  // same speaker are kept as separate cues so they stay readable in
+  // standard players. Each cue uses the WebVTT speaker tag (<v Name>).
+  function toVtt(doc) {
+    if (!doc) return "WEBVTT\n";
+    const parties = Array.isArray(doc.parties) ? doc.parties : [];
+    const dialog = Array.isArray(doc.dialog) ? doc.dialog : [];
+    const t0 = Date.parse(doc.created_at);
+    const baseMs = Number.isFinite(t0) ? t0 : null;
+
+    function fmtTime(ms) {
+      if (!Number.isFinite(ms) || ms < 0) ms = 0;
+      const h = Math.floor(ms / 3_600_000);
+      const m = Math.floor((ms % 3_600_000) / 60_000);
+      const s = Math.floor((ms % 60_000) / 1000);
+      const msec = Math.floor(ms % 1000);
+      const pad = (n, w = 2) => String(n).padStart(w, "0");
+      return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(msec, 3)}`;
+    }
+
+    function escapeCue(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    const lines = ["WEBVTT", ""];
+    let cueIdx = 1;
+    for (const d of dialog) {
+      const startAbs = Date.parse(d.start);
+      if (!Number.isFinite(startAbs)) continue;
+      const startRel = baseMs != null ? startAbs - baseMs : 0;
+      const durationMs = (typeof d.duration === "number" ? d.duration : 0) * 1000;
+      const endRel = startRel + (durationMs > 0 ? durationMs : 2000);
+      const idx = Array.isArray(d.parties) ? d.parties[0] : null;
+      const speaker = parties[idx]?.name || "unknown";
+      const text = (d.body || "").trim();
+      if (!text) continue;
+      lines.push(String(cueIdx++));
+      lines.push(`${fmtTime(startRel)} --> ${fmtTime(endRel)}`);
+      lines.push(`<v ${escapeCue(speaker)}>${escapeCue(text)}`);
+      lines.push("");
+    }
+    return lines.join("\n");
+  }
+
+  ns.vcon = { uuidv4, assemble, toMarkdown, toVtt };
 })(typeof self !== "undefined" ? self : window);

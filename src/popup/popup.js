@@ -93,6 +93,7 @@ function renderMeetingItem(m) {
       ? "no captions"
       : `${m.utteranceCount ?? 0} utterance${m.utteranceCount === 1 ? "" : "s"}`;
 
+  const hasVcon = !!m.vcon;
   li.innerHTML = `
     <div class="row">
       <span class="title" title="${escape(subject)}">
@@ -101,6 +102,13 @@ function renderMeetingItem(m) {
       <span class="meta">${escape(fmtTime(m.endedAt || m.startedAt))}</span>
     </div>
     <div class="detail">${escape(utt)}${dur ? ` · ${escape(dur)}` : ""}</div>
+    ${hasVcon ? `
+      <div class="actions">
+        <button data-action="download-meeting-vcon" data-uuid="${escape(m.uuid)}">vCon</button>
+        <button data-action="download-meeting-md" data-uuid="${escape(m.uuid)}">.md</button>
+        <button data-action="download-meeting-vtt" data-uuid="${escape(m.uuid)}">.vtt</button>
+      </div>
+    ` : ""}
   `;
   return li;
 }
@@ -145,19 +153,60 @@ async function refresh() {
   await Promise.all([loadConfig(), loadQueue(), loadMeetings()]);
 }
 
+function sanitizeFilename(s) {
+  return String(s || "meetvcon")
+    .replace(/[\/\\:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "_")
+    .slice(0, 80) || "meetvcon";
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadVconDoc(vconDoc, baseName) {
+  const blob = new Blob([JSON.stringify(vconDoc, null, 2)], {
+    type: "application/vcon+json",
+  });
+  triggerDownload(blob, `${baseName}.vcon.json`);
+}
+
+function downloadMarkdownDoc(vconDoc, baseName) {
+  const md = self.MeetVcon?.vcon?.toMarkdown?.(vconDoc) || "";
+  const blob = new Blob([md], { type: "text/markdown" });
+  triggerDownload(blob, `${baseName}.md`);
+}
+
+function downloadVttDoc(vconDoc, baseName) {
+  const vtt = self.MeetVcon?.vcon?.toVtt?.(vconDoc) || "WEBVTT\n";
+  const blob = new Blob([vtt], { type: "text/vtt" });
+  triggerDownload(blob, `${baseName}.vtt`);
+}
+
 async function downloadVcon(id) {
   const { queue } = await chrome.storage.local.get("queue");
   const item = (queue || []).find((q) => q.id === id);
   if (!item) return;
-  const blob = new Blob([JSON.stringify(item.vcon, null, 2)], {
-    type: "application/vcon+json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${item.vcon?.uuid || "meetvcon"}.vcon.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadVconDoc(item.vcon, item.vcon?.uuid || "meetvcon");
+}
+
+async function downloadMeetingByUuid(uuid, format) {
+  const { meetings } = await chrome.storage.local.get("meetings");
+  const m = (meetings || []).find((x) => x.uuid === uuid);
+  if (!m || !m.vcon) return;
+  const base = sanitizeFilename(m.subject || m.meetingId || m.uuid);
+  if (format === "md") {
+    downloadMarkdownDoc(m.vcon, base);
+  } else if (format === "vtt") {
+    downloadVttDoc(m.vcon, base);
+  } else {
+    downloadVconDoc(m.vcon, base);
+  }
 }
 
 els.queueList.addEventListener("click", async (e) => {
@@ -185,6 +234,20 @@ els.queueList.addEventListener("click", async (e) => {
   } catch (err) {
     btn.disabled = false;
     btn.textContent = `Error: ${err.message}`;
+  }
+});
+
+els.meetingsList.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const uuid = btn.dataset.uuid;
+  if (action === "download-meeting-vcon") {
+    await downloadMeetingByUuid(uuid, "vcon");
+  } else if (action === "download-meeting-md") {
+    await downloadMeetingByUuid(uuid, "md");
+  } else if (action === "download-meeting-vtt") {
+    await downloadMeetingByUuid(uuid, "vtt");
   }
 });
 

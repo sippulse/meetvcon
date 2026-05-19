@@ -193,6 +193,7 @@ async function deliverMeeting(record, deliveryKind) {
         endedAt: new Date().toISOString(),
         utteranceCount: record.utterances?.length || 0,
         status: "delivered",
+        vcon: vConDoc,
       });
     }
     return;
@@ -326,6 +327,20 @@ async function retryQueueItem(id, manual) {
   if (result.ok) {
     queue.splice(idx, 1);
     await storage.setQueue(queue);
+    if (item.deliveryKind === "final") {
+      const v = item.vcon || {};
+      const meta = v.attachments?.find((a) => a.type === "meeting_metadata")?.body || {};
+      await storage.appendMeetingLog({
+        uuid: v.uuid,
+        meetingId: meta.meeting_code,
+        subject: v.subject,
+        startedAt: v.created_at,
+        endedAt: new Date().toISOString(),
+        utteranceCount: v.dialog?.length || 0,
+        status: "delivered",
+        vcon: v,
+      });
+    }
     log.info("queue retry succeeded", id);
     return { ok: true };
   }

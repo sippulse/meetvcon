@@ -69,6 +69,7 @@
   }
 
   function recordBlock(el) {
+    if (el.tagName === "BUTTON" || el.getAttribute("role") === "button") return;
     let entry = state.blocksByEl.get(el);
     const parsed = parseBlock(el);
     const now = new Date();
