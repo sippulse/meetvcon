@@ -270,11 +270,18 @@ els.meetingsList.addEventListener("click", async (e) => {
   } else if (action === "remove-meeting") {
     btn.disabled = true;
     try {
-      await chrome.runtime.sendMessage({ type: "remove_meeting", uuid });
-      await refresh();
+      const r = await chrome.runtime.sendMessage({ type: "remove_meeting", uuid });
+      if (r?.ok) {
+        await refresh();
+      } else {
+        btn.disabled = false;
+        btn.textContent = `Failed: ${r?.error || "unknown"}`;
+        setTimeout(() => { btn.textContent = "Remove"; }, 4500);
+      }
     } catch (err) {
       btn.disabled = false;
       btn.textContent = `Error: ${err.message}`;
+      setTimeout(() => { btn.textContent = "Remove"; }, 4500);
     }
   }
 });
