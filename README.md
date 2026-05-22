@@ -54,6 +54,9 @@ The extension is not yet published on the Chrome Web Store. To run it:
 4. Click **Load unpacked** and select the cloned `meetvcon/` directory.
 5. Pin the extension from the toolbar puzzle-piece menu.
 
+For detailed steps, how to update (`git pull` + reload), uninstall, and
+troubleshooting, see [**INSTALL.md**](./INSTALL.md).
+
 ## Configure
 
 Right-click the MeetVcon icon → **Options**.

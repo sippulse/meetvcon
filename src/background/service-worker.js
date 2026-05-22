@@ -78,10 +78,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
       return true;
 
+    case "replay_meeting":
+      replayMeeting(msg.uuid)
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+
+    case "remove_meeting":
+      storage
+        .removeMeetingFromLog(msg.uuid)
+        .then((removed) => sendResponse({ ok: true, removed }))
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+
     default:
       return false;
   }
 });
+
+async function replayMeeting(uuid) {
+  if (!uuid) return { ok: false, error: "missing uuid" };
+  const meetings = await storage.getMeetingsLog();
+  const m = meetings.find((x) => x.uuid === uuid);
+  if (!m || !m.vcon) return { ok: false, error: "vcon_not_stored" };
+  const cfg = await storage.getConfig();
+  if (!cfg.webhookUrl) return { ok: false, error: "No webhook URL configured" };
+  const result = await postWebhook(m.vcon, cfg, "replay");
+  if (result.ok) {
+    log.info("replay delivered", uuid, "status", result.status);
+  } else {
+    log.warn("replay failed", uuid, result.error);
+  }
+  return result;
+}
 
 // ---- call lifecycle -------------------------------------------------
 

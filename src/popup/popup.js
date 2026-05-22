@@ -102,13 +102,15 @@ function renderMeetingItem(m) {
       <span class="meta">${escape(fmtTime(m.endedAt || m.startedAt))}</span>
     </div>
     <div class="detail">${escape(utt)}${dur ? ` · ${escape(dur)}` : ""}</div>
-    ${hasVcon ? `
-      <div class="actions">
+    <div class="actions">
+      ${hasVcon ? `
+        <button data-action="replay-meeting" data-uuid="${escape(m.uuid)}">Resend</button>
         <button data-action="download-meeting-vcon" data-uuid="${escape(m.uuid)}">vCon</button>
         <button data-action="download-meeting-md" data-uuid="${escape(m.uuid)}">.md</button>
         <button data-action="download-meeting-vtt" data-uuid="${escape(m.uuid)}">.vtt</button>
-      </div>
-    ` : ""}
+      ` : ""}
+      <button data-action="remove-meeting" data-uuid="${escape(m.uuid)}" class="danger">Remove</button>
+    </div>
   `;
   return li;
 }
@@ -248,6 +250,39 @@ els.meetingsList.addEventListener("click", async (e) => {
     await downloadMeetingByUuid(uuid, "md");
   } else if (action === "download-meeting-vtt") {
     await downloadMeetingByUuid(uuid, "vtt");
+  } else if (action === "replay-meeting") {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    try {
+      const r = await chrome.runtime.sendMessage({ type: "replay_meeting", uuid });
+      if (r?.ok) {
+        btn.textContent = `Sent (HTTP ${r.status})`;
+        setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 2500);
+      } else {
+        btn.textContent = `Failed: ${r?.error || "unknown"}`;
+        setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 4500);
+      }
+    } catch (err) {
+      btn.textContent = `Error: ${err.message}`;
+      setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 4500);
+    }
+  } else if (action === "remove-meeting") {
+    btn.disabled = true;
+    try {
+      const r = await chrome.runtime.sendMessage({ type: "remove_meeting", uuid });
+      if (r?.ok) {
+        await refresh();
+      } else {
+        btn.disabled = false;
+        btn.textContent = `Failed: ${r?.error || "unknown"}`;
+        setTimeout(() => { btn.textContent = "Remove"; }, 4500);
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = `Error: ${err.message}`;
+      setTimeout(() => { btn.textContent = "Remove"; }, 4500);
+    }
   }
 });
 
