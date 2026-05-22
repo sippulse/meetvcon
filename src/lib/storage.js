@@ -77,6 +77,13 @@
     await chrome.storage.local.set({ meetings: log.slice(0, 100) });
   }
 
+  async function removeMeetingFromLog(uuid) {
+    const log = await getMeetingsLog();
+    const next = log.filter((m) => m.uuid !== uuid);
+    await chrome.storage.local.set({ meetings: next });
+    return log.length !== next.length;
+  }
+
   ns.storage = {
     DEFAULT_CONFIG,
     getConfig,
@@ -89,5 +96,6 @@
     setQueue,
     getMeetingsLog,
     appendMeetingLog,
+    removeMeetingFromLog,
   };
 })(typeof self !== "undefined" ? self : window);
