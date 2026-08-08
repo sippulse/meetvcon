@@ -51,8 +51,11 @@ function escape(s) {
 
 function renderQueueItem(item) {
   const li = document.createElement("li");
-  const subject = item.vcon?.subject || item.vcon?.attachments?.[0]?.body?.meeting_code || "(unknown)";
-  const kind = item.deliveryKind || "delivery";
+  const isEmail = item.kind === "email";
+  const subject = isEmail
+    ? item.email?.subject || "(email)"
+    : item.vcon?.subject || item.vcon?.attachments?.[0]?.body?.meeting_code || "(unknown)";
+  const kind = isEmail ? "email" : item.deliveryKind || "delivery";
   const next = item.nextAttemptAt ? fmtTime(item.nextAttemptAt) : "";
   li.innerHTML = `
     <div class="row">
@@ -65,7 +68,7 @@ function renderQueueItem(item) {
     </div>
     <div class="actions">
       <button data-action="retry" data-id="${escape(item.id)}">Retry now</button>
-      <button data-action="download" data-id="${escape(item.id)}">Download vCon</button>
+      ${isEmail ? "" : `<button data-action="download" data-id="${escape(item.id)}">Download vCon</button>`}
       <button data-action="discard" data-id="${escape(item.id)}" class="danger">Discard</button>
     </div>
   `;
@@ -92,6 +95,11 @@ function renderMeetingItem(m) {
     status === "skipped_no_captions"
       ? "no captions"
       : `${m.utteranceCount ?? 0} utterance${m.utteranceCount === 1 ? "" : "s"}`;
+  const emailNote =
+    m.emailStatus === "sent" ? " · emailed" :
+    m.emailStatus === "queued" ? " · email queued" :
+    m.emailStatus === "failed" || m.emailStatus === "no_recipient" ||
+    m.emailStatus === "misconfigured" ? " · email failed" : "";
 
   const hasVcon = !!m.vcon;
   li.innerHTML = `
@@ -101,12 +109,14 @@ function renderMeetingItem(m) {
       </span>
       <span class="meta">${escape(fmtTime(m.endedAt || m.startedAt))}</span>
     </div>
-    <div class="detail">${escape(utt)}${dur ? ` · ${escape(dur)}` : ""}</div>
+    <div class="detail">${escape(utt)}${dur ? ` · ${escape(dur)}` : ""}${escape(emailNote)}</div>
     <div class="actions">
       ${hasVcon ? `
         <button data-action="replay-meeting" data-uuid="${escape(m.uuid)}">Resend</button>
+        <button data-action="email-meeting" data-uuid="${escape(m.uuid)}">Email</button>
         <button data-action="download-meeting-vcon" data-uuid="${escape(m.uuid)}">vCon</button>
         <button data-action="download-meeting-md" data-uuid="${escape(m.uuid)}">.md</button>
+        <button data-action="download-meeting-txt" data-uuid="${escape(m.uuid)}">.txt</button>
         <button data-action="download-meeting-vtt" data-uuid="${escape(m.uuid)}">.vtt</button>
       ` : ""}
       <button data-action="remove-meeting" data-uuid="${escape(m.uuid)}" class="danger">Remove</button>
@@ -184,6 +194,12 @@ function downloadMarkdownDoc(vconDoc, baseName) {
   triggerDownload(blob, `${baseName}.md`);
 }
 
+function downloadTxtDoc(vconDoc, baseName) {
+  const txt = self.MeetVcon?.vcon?.toPlainText?.(vconDoc) || "";
+  const blob = new Blob([txt], { type: "text/plain" });
+  triggerDownload(blob, `${baseName}.txt`);
+}
+
 function downloadVttDoc(vconDoc, baseName) {
   const vtt = self.MeetVcon?.vcon?.toVtt?.(vconDoc) || "WEBVTT\n";
   const blob = new Blob([vtt], { type: "text/vtt" });
@@ -204,6 +220,8 @@ async function downloadMeetingByUuid(uuid, format) {
   const base = sanitizeFilename(m.subject || m.meetingId || m.uuid);
   if (format === "md") {
     downloadMarkdownDoc(m.vcon, base);
+  } else if (format === "txt") {
+    downloadTxtDoc(m.vcon, base);
   } else if (format === "vtt") {
     downloadVttDoc(m.vcon, base);
   } else {
@@ -248,8 +266,27 @@ els.meetingsList.addEventListener("click", async (e) => {
     await downloadMeetingByUuid(uuid, "vcon");
   } else if (action === "download-meeting-md") {
     await downloadMeetingByUuid(uuid, "md");
+  } else if (action === "download-meeting-txt") {
+    await downloadMeetingByUuid(uuid, "txt");
   } else if (action === "download-meeting-vtt") {
     await downloadMeetingByUuid(uuid, "vtt");
+  } else if (action === "email-meeting") {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    try {
+      const r = await chrome.runtime.sendMessage({ type: "email_meeting", uuid });
+      if (r?.ok) {
+        btn.textContent = "Sent ✓";
+        setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 2500);
+      } else {
+        btn.textContent = `Failed: ${r?.error || "unknown"}`;
+        setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 4500);
+      }
+    } catch (err) {
+      btn.textContent = `Error: ${err.message}`;
+      setTimeout(() => { btn.disabled = false; btn.textContent = original; }, 4500);
+    }
   } else if (action === "replay-meeting") {
     const original = btn.textContent;
     btn.disabled = true;

@@ -59,6 +59,74 @@
       </fieldset>
 
       <fieldset>
+        <legend>AI summary (on-device)</legend>
+
+        <label class="checkbox">
+          <input type="checkbox" id="summaryEnabled" />
+          <span>
+            Generate a meeting summary at end of call using Chrome's built-in
+            on-device AI (Gemini Nano). The summary is added to the vCon
+            (<code>analysis[]</code>, so your webhook receiver gets it too)
+            and included in the email. Nothing is sent to any external AI
+            service — the model runs entirely on this machine.
+          </span>
+        </label>
+
+        <div id="summaryStatus" class="hint" aria-live="polite"></div>
+        <div class="actions-inline">
+          <button type="button" id="summaryDownload" class="hidden">Download model</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Email delivery</legend>
+
+        <label class="checkbox">
+          <input type="checkbox" id="emailEnabled" />
+          <span>
+            Email me the summary and plain-text transcript when the call ends.
+            Sent through the transactional-email provider you configure below;
+            the API key stays in <code>chrome.storage.local</code>.
+          </span>
+        </label>
+
+        <label>
+          <span class="lbl">Provider</span>
+          <select id="emailProvider">
+            <option value="resend">Resend</option>
+            <option value="sendgrid">SendGrid</option>
+            <option value="mailgun">Mailgun</option>
+          </select>
+        </label>
+
+        <label>
+          <span class="lbl">API key</span>
+          <input type="password" id="emailApiKey" autocomplete="off" />
+        </label>
+
+        <label id="mailgunDomainLabel" class="hidden">
+          <span class="lbl">Mailgun domain</span>
+          <input type="text" id="emailMailgunDomain" placeholder="mg.example.com" />
+        </label>
+
+        <label>
+          <span class="lbl">From</span>
+          <input type="text" id="emailFrom" placeholder="MeetVcon &lt;meetings@yourdomain.com&gt;" />
+          <span class="hint">Must be a sender/domain verified with your provider.</span>
+        </label>
+
+        <label>
+          <span class="lbl">To (optional)</span>
+          <input type="text" id="emailTo" />
+          <span class="hint" id="emailToHint">Comma-separated. Leave empty to send to your Chrome profile email.</span>
+        </label>
+
+        <div class="actions-inline">
+          <button type="button" id="testEmail">Send test email</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Privacy</legend>
 
         <label class="checkbox">
@@ -84,6 +152,8 @@
       </div>
     </form>
   </main>
+  <script src="../lib/email.js"></script>
+  <script src="../lib/summarizer.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

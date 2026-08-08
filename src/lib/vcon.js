@@ -58,10 +58,12 @@
   // Assemble a vCon from a meeting record.
   // record: { uuid, meetingId, meetingUrl, subject, startedAt,
   //           utterances, captionsEnabled }
-  // opts:   { capturedBy, deliveryKind, capturedByUser }
+  // opts:   { capturedBy, deliveryKind, capturedByUser, summary }
   //   capturedByUser: { email, id } | null — the Chrome profile that ran
   //   the extension. Surfaces in attachments[].body.captured_by_user when
   //   present.
+  //   summary: string | null — on-device AI summary; becomes an
+  //   analysis[] entry of type "summary" when present.
   function assemble(record, opts = {}) {
     const utterances = record.utterances || [];
     const { parties, speakerToIndex } = buildParties(utterances);
@@ -84,6 +86,18 @@
       }
     }
 
+    const analysis = [];
+    if (opts.summary) {
+      analysis.push({
+        type: "summary",
+        dialog: dialog.map((_, i) => i),
+        vendor: "google",
+        product: "chrome-built-in-summarizer",
+        encoding: "none",
+        body: opts.summary,
+      });
+    }
+
     return {
       vcon: "0.0.1",
       uuid: record.uuid,
@@ -91,7 +105,7 @@
       subject: record.subject || "",
       parties,
       dialog,
-      analysis: [],
+      analysis,
       attachments: [
         {
           type: "meeting_metadata",
@@ -183,6 +197,92 @@
     return lines.join("\n");
   }
 
+  // Render a vCon as a plain-text document: details, participants, the
+  // AI summary (when analysis[] carries one), and the full transcript.
+  // Used as the email body and the popup's ".txt" download.
+  function toPlainText(doc) {
+    if (!doc) return "";
+    const meta = doc.attachments?.find((a) => a.type === "meeting_metadata")?.body || {};
+    const parties = Array.isArray(doc.parties) ? doc.parties : [];
+    const dialog = Array.isArray(doc.dialog) ? doc.dialog : [];
+
+    const lines = [];
+    const subject = doc.subject || meta.meeting_code || "(no title)";
+    lines.push(subject);
+    lines.push("=".repeat(Math.max(subject.length, 4)));
+    lines.push("");
+
+    function fmtLocal(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return isNaN(d) ? "" : d.toLocaleString();
+    }
+
+    if (meta.meeting_code) lines.push(`Meeting code: ${meta.meeting_code}`);
+    if (meta.meeting_url) lines.push(`URL: ${meta.meeting_url}`);
+    const started = fmtLocal(doc.created_at);
+    if (started) lines.push(`Started: ${started}`);
+    const lastDialog = dialog[dialog.length - 1];
+    if (lastDialog?.start) {
+      const endMs =
+        Date.parse(lastDialog.start) + (lastDialog.duration || 0) * 1000;
+      const ended = fmtLocal(new Date(endMs).toISOString());
+      if (ended) lines.push(`Ended: ${ended}`);
+    }
+    lines.push("");
+
+    if (parties.length) {
+      lines.push("Participants:");
+      for (const p of parties) {
+        lines.push(`  - ${p.mailto ? `${p.name} (${p.mailto})` : p.name}`);
+      }
+      lines.push("");
+    }
+
+    const summary = Array.isArray(doc.analysis)
+      ? doc.analysis.find((a) => a.type === "summary")?.body
+      : null;
+    if (summary) {
+      lines.push("Summary");
+      lines.push("-------");
+      lines.push(String(summary).trim());
+      lines.push("");
+    }
+
+    lines.push("Transcript");
+    lines.push("----------");
+
+    function fmtClock(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d)) return "";
+      return d.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+    }
+
+    let lastSpeakerIdx = -1;
+    for (const d of dialog) {
+      const idx = Array.isArray(d.parties) ? d.parties[0] : null;
+      const speaker = parties[idx]?.name || "unknown";
+      const clock = fmtClock(d.start);
+      const text = (d.body || "").trim();
+      if (!text) continue;
+      if (idx !== lastSpeakerIdx) {
+        lines.push("");
+        lines.push(`${speaker}${clock ? ` [${clock}]` : ""}:`);
+        lastSpeakerIdx = idx;
+      }
+      lines.push(text);
+    }
+    lines.push("");
+
+    return lines.join("\n");
+  }
+
   // Render a vCon as a WebVTT subtitle file. Timestamps are relative to
   // doc.created_at (the meeting start). Consecutive utterances from the
   // same speaker are kept as separate cues so they stay readable in
@@ -231,5 +331,5 @@
     return lines.join("\n");
   }
 
-  ns.vcon = { uuidv4, assemble, toMarkdown, toVtt };
+  ns.vcon = { uuidv4, assemble, toMarkdown, toPlainText, toVtt };
 })(typeof self !== "undefined" ? self : window);

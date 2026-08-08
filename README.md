@@ -36,6 +36,15 @@ See [`PRD.md`](./PRD.md) for the full product specification.
   HMAC-SHA256 body signature.
 - **Capturer attribution.** Each vCon includes the Chrome profile email
   of the user who ran the extension (toggleable).
+- **On-device AI summary (optional).** At end of call, Chrome's built-in
+  Summarizer (Gemini Nano, Chrome 138+) generates a key-points summary
+  entirely on your machine — no external AI service. The summary is added
+  to the vCon (`analysis[]`) so your webhook/CRM receives it too.
+- **Email delivery (optional).** After each call, MeetVcon emails you the
+  summary and the full plain-text transcript through the transactional
+  email provider you configure (Resend, SendGrid, or Mailgun) using your
+  own API key. Recipient defaults to your Chrome profile email. Failed
+  sends land in the same retry queue as webhooks.
 - **In-call status panel** with capture indicator and one-click
   opt-out / try-again.
 - **Popup UI.** Pending-delivery queue (Retry / Download vCon / Discard)
@@ -69,9 +78,16 @@ Right-click the MeetVcon icon → **Options**.
 | Delivery mode | yes | `end_of_call` (default) or `periodic_snapshot`. |
 | Snapshot interval | conditional | Minutes between snapshots, when in `periodic_snapshot` mode (1–60, default 5). |
 | Include capturer email | no | When on (default), the Chrome profile email is included in `attachments[0].body.captured_by_user.email`. |
+| AI summary | no | When on, an on-device summary (Chrome built-in Summarizer / Gemini Nano) is generated at end of call and added to `analysis[]` and to the email. Requires Chrome 138+ and a one-time model download (button in Options). |
+| Email delivery | no | When on, the summary + plain-text transcript are emailed at end of call. |
+| Email provider | conditional | `Resend`, `SendGrid`, or `Mailgun`. |
+| Email API key | conditional | Your provider API key. Stored only in `chrome.storage.local`. |
+| Mailgun domain | conditional | Sending domain, Mailgun only (e.g. `mg.example.com`). |
+| From | conditional | Sender address; must be verified with your provider. |
+| To | no | Comma-separated recipients. Empty = your Chrome profile email. |
 
 Click **Send test payload** to verify your receiver gets a vCon before
-joining a real call.
+joining a real call, and **Send test email** to verify email delivery.
 
 ## vCon payload shape
 
@@ -168,7 +184,9 @@ src/
     logger.js                          shared [MeetVcon] logger
     selectors.js                       Meet DOM selectors (multilingual)
     storage.js                         chrome.storage helpers
-    vcon.js                            vCon assembler
+    vcon.js                            vCon assembler + renderers
+    email.js                           email provider HTTP requests
+    summarizer.js                      on-device summary (Gemini Nano)
   content/
     captions-watchdog.js               auto-enable + monitoring
     transcript-capture.js              caption DOM observer
@@ -186,12 +204,17 @@ src/
 
 ## Privacy
 
-- Transcripts never leave the device until POSTed to your webhook.
-- No telemetry, no analytics, no third-party services.
+- Transcripts never leave the device until POSTed to your webhook and/or
+  emailed via the provider you configured.
+- No telemetry, no analytics, no third-party services you didn't configure.
 - No external STT or LLM. Transcription is whatever Meet's browser
-  captions produce.
-- Webhook URL, bearer token, and HMAC secret are stored exclusively in
-  `chrome.storage.local` and are never hardcoded in source.
+  captions produce; the optional summary runs on-device (Chrome built-in
+  Summarizer / Gemini Nano) — transcript text is never sent to an
+  external AI service.
+- Email delivery, when enabled, sends the transcript through the
+  transactional email provider **you** chose, with **your** API key.
+- Webhook URL, bearer token, HMAC secret, and email API key are stored
+  exclusively in `chrome.storage.local` and are never hardcoded in source.
 
 ## Legal & consent
 

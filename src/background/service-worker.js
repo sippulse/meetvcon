@@ -14,9 +14,11 @@
 import "../lib/logger.js";
 import "../lib/storage.js";
 import "../lib/vcon.js";
+import "../lib/email.js";
+import "../lib/summarizer.js";
 
-const { log, storage, vcon } = self.MeetVcon;
-const VERSION = "0.1.0";
+const { log, storage, vcon, email, summarizer } = self.MeetVcon;
+const VERSION = "0.2.0";
 const USER_AGENT = `MeetVcon/${VERSION}`;
 
 // Backoff schedule in minutes. Index = attempt number (0-based).
@@ -62,6 +64,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     case "test_webhook":
       handleTestWebhook()
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+
+    case "test_email":
+      handleTestEmail()
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+
+    case "email_meeting":
+      emailMeeting(msg.uuid)
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
       return true;
@@ -187,8 +201,10 @@ const retryAlarmName = (id) => `retry:${id}`;
 
 async function deliverMeeting(record, deliveryKind) {
   const cfg = await storage.getConfig();
-  if (!cfg.webhookUrl) {
-    log.warn("no webhook URL configured; skipping", deliveryKind, record.meetingId);
+  const isFinal = deliveryKind === "final";
+  const emailWanted = isFinal && cfg.emailEnabled && email.configComplete(cfg);
+  if (!cfg.webhookUrl && !emailWanted) {
+    log.warn("no delivery target configured; skipping", deliveryKind, record.meetingId);
     return;
   }
 
@@ -196,45 +212,192 @@ async function deliverMeeting(record, deliveryKind) {
     ? await getProfileUser()
     : null;
 
+  // Summarize only the final delivery (snapshots would waste compute)
+  // and only when the on-device model is ready. Failure → no analysis.
+  let summary = null;
+  if (isFinal && cfg.summaryEnabled) {
+    summary = await withKeepAlive(() => summarizer.summarizeRecord(record));
+    log.info(summary ? "summary generated for" : "no summary for", record.meetingId);
+  }
+
   const vConDoc = vcon.assemble(record, {
     capturedBy: USER_AGENT,
     deliveryKind,
     capturedByUser,
+    summary,
   });
 
-  const result = await postWebhook(vConDoc, cfg, deliveryKind);
-  if (result.ok) {
-    log.info(
-      "delivered",
-      deliveryKind,
-      record.meetingId,
-      "→",
-      cfg.webhookUrl,
-      "status",
-      result.status
-    );
-    if (deliveryKind === "final") {
-      await storage.appendMeetingLog({
-        uuid: record.uuid,
-        meetingId: record.meetingId,
-        subject: record.subject,
-        startedAt: record.startedAt,
-        endedAt: new Date().toISOString(),
-        utteranceCount: record.utterances?.length || 0,
-        status: "delivered",
+  let webhookStatus = "no_webhook";
+  if (cfg.webhookUrl) {
+    const result = await postWebhook(vConDoc, cfg, deliveryKind);
+    if (result.ok) {
+      webhookStatus = "delivered";
+      log.info(
+        "delivered",
+        deliveryKind,
+        record.meetingId,
+        "→",
+        cfg.webhookUrl,
+        "status",
+        result.status
+      );
+    } else {
+      webhookStatus = "queued";
+      log.warn("delivery failed", deliveryKind, record.meetingId, result.error);
+      await enqueue({
         vcon: vConDoc,
+        url: cfg.webhookUrl,
+        deliveryKind,
+        error: result.error,
       });
     }
-    return;
   }
 
-  log.warn("delivery failed", deliveryKind, record.meetingId, result.error);
-  await enqueue({
-    vcon: vConDoc,
-    url: cfg.webhookUrl,
-    deliveryKind,
-    error: result.error,
+  let emailStatus;
+  if (emailWanted) {
+    emailStatus = await sendMeetingEmail(vConDoc, cfg);
+  } else if (isFinal && cfg.emailEnabled) {
+    emailStatus = "misconfigured";
+    log.warn("email enabled but configuration incomplete; skipping email");
+  }
+
+  // Log-entry semantics unchanged for the webhook path: when the webhook
+  // send failed, the entry is written by the successful retry. Write now
+  // only when the webhook delivered or is not configured.
+  if (isFinal && webhookStatus !== "queued") {
+    await storage.appendMeetingLog({
+      uuid: record.uuid,
+      meetingId: record.meetingId,
+      subject: record.subject,
+      startedAt: record.startedAt,
+      endedAt: new Date().toISOString(),
+      utteranceCount: record.utterances?.length || 0,
+      status: webhookStatus,
+      emailStatus,
+      vcon: vConDoc,
+    });
+  }
+}
+
+// ---- email delivery --------------------------------------------------
+
+// Returns "sent" | "queued" | "no_recipient".
+async function sendMeetingEmail(vConDoc, cfg) {
+  const to = await resolveEmailRecipients(cfg);
+  if (!to.length) {
+    log.warn("email enabled but no recipient (set a To address or sign into Chrome)");
+    return "no_recipient";
+  }
+  const msg = email.buildMessage(vConDoc, { from: cfg.emailFrom, to });
+  const result = await postEmail(msg, cfg);
+  if (result.ok) {
+    log.info("email sent for", vConDoc.uuid, "to", to.join(", "));
+    return "sent";
+  }
+  log.warn("email send failed", vConDoc.uuid, result.error);
+  await enqueueEmail({ uuid: vConDoc.uuid, msg, error: result.error });
+  return "queued";
+}
+
+async function resolveEmailRecipients(cfg) {
+  const explicit = email.splitRecipients(cfg.emailTo);
+  if (explicit.length) return explicit;
+  const profile = await getProfileUser();
+  return profile?.email ? [profile.email] : [];
+}
+
+async function postEmail(msg, cfg) {
+  if (!email.configComplete(cfg)) {
+    return { ok: false, error: "Email not fully configured" };
+  }
+  const host = email.providerHost(cfg);
+  const has = await chrome.permissions.contains({
+    origins: [`https://${host}/*`],
   });
+  if (!has) {
+    return {
+      ok: false,
+      error: `No host permission for ${host}. Open MeetVcon options and re-save the email settings to grant access.`,
+    };
+  }
+  const req = email.buildRequest(cfg, msg);
+  try {
+    const resp = await fetch(req.url, {
+      method: "POST",
+      headers: req.headers,
+      body: req.body,
+    });
+    if (resp.ok) return { ok: true, status: resp.status };
+    let detail = "";
+    try {
+      detail = (await resp.text()).slice(0, 200);
+    } catch {}
+    return {
+      ok: false,
+      error: `HTTP ${resp.status}${detail ? `: ${detail}` : ""}`,
+      status: resp.status,
+    };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+async function enqueueEmail({ uuid, msg, error }) {
+  const queue = await storage.getQueue();
+  const id = vcon.uuidv4();
+  const delayMin = BACKOFF_MIN[0];
+  queue.push({
+    id,
+    kind: "email",
+    uuid,
+    email: msg,
+    deliveryKind: "email",
+    attempts: 0,
+    nextAttemptAt: new Date(Date.now() + delayMin * 60_000).toISOString(),
+    lastError: error,
+  });
+  await storage.setQueue(queue);
+  chrome.alarms.create(retryAlarmName(id), { delayInMinutes: delayMin });
+  log.info("email queued for retry in", delayMin, "min (id:", id, ")");
+}
+
+// Manual "Email" action from the popup for a stored meeting.
+async function emailMeeting(uuid) {
+  if (!uuid) return { ok: false, error: "missing uuid" };
+  const meetings = await storage.getMeetingsLog();
+  const m = meetings.find((x) => x.uuid === uuid);
+  if (!m || !m.vcon) return { ok: false, error: "vcon_not_stored" };
+  const cfg = await storage.getConfig();
+  if (!email.configComplete(cfg)) {
+    return { ok: false, error: "Email not configured (see Options)" };
+  }
+  const to = await resolveEmailRecipients(cfg);
+  if (!to.length) return { ok: false, error: "No recipient configured" };
+  const msg = email.buildMessage(m.vcon, { from: cfg.emailFrom, to });
+  const result = await postEmail(msg, cfg);
+  if (result.ok) {
+    await storage.updateMeetingLog(uuid, { emailStatus: "sent" });
+    log.info("manual email sent for", uuid);
+  } else {
+    log.warn("manual email failed", uuid, result.error);
+  }
+  return result;
+}
+
+// MV3 service workers idle out after ~30s without extension-API activity.
+// Long on-device summarization may not count as activity, so ping a cheap
+// API on an interval while it runs.
+async function withKeepAlive(fn) {
+  const t = setInterval(() => {
+    try {
+      chrome.runtime.getPlatformInfo(() => {});
+    } catch {}
+  }, 20_000);
+  try {
+    return await fn();
+  } finally {
+    clearInterval(t);
+  }
 }
 
 async function postWebhook(vConDoc, cfg, deliveryKind) {
@@ -352,11 +515,17 @@ async function retryQueueItem(id, manual) {
   }
   const item = queue[idx];
   const cfg = await storage.getConfig();
-  const result = await postWebhook(item.vcon, cfg, item.deliveryKind);
+  const result =
+    item.kind === "email"
+      ? await postEmail(item.email, cfg)
+      : await postWebhook(item.vcon, cfg, item.deliveryKind);
   if (result.ok) {
     queue.splice(idx, 1);
     await storage.setQueue(queue);
-    if (item.deliveryKind === "final") {
+    if (item.kind === "email") {
+      // The meeting-log entry (if written) still says "queued"; flip it.
+      await storage.updateMeetingLog(item.uuid, { emailStatus: "sent" });
+    } else if (item.deliveryKind === "final") {
       const v = item.vcon || {};
       const meta = v.attachments?.find((a) => a.type === "meeting_metadata")?.body || {};
       await storage.appendMeetingLog({
@@ -385,6 +554,9 @@ async function retryQueueItem(id, manual) {
   if (item.attempts >= BACKOFF_MIN.length) {
     queue.splice(idx, 1);
     await storage.setQueue(queue);
+    if (item.kind === "email") {
+      await storage.updateMeetingLog(item.uuid, { emailStatus: "failed" });
+    }
     log.error("dropping queue item after max retries", id);
     return { ok: false, error: "max_retries" };
   }
@@ -444,6 +616,40 @@ async function handleTestWebhook() {
     capturedByUser,
   });
   return await postWebhook(doc, cfg, "test");
+}
+
+// ---- test email -------------------------------------------------------
+
+async function handleTestEmail() {
+  const cfg = await storage.getConfig();
+  if (!email.configComplete(cfg)) {
+    return {
+      ok: false,
+      error: "Fill in provider, API key and From address first",
+    };
+  }
+  const to = await resolveEmailRecipients(cfg);
+  if (!to.length) {
+    return {
+      ok: false,
+      error: "No recipient: set a To address or sign into Chrome",
+    };
+  }
+  return await postEmail(
+    {
+      from: cfg.emailFrom,
+      to,
+      subject: "MeetVcon test email",
+      text: [
+        "This is a test email from the MeetVcon options page.",
+        "",
+        "If you can read this, email delivery is configured correctly.",
+        "After each Google Meet call you will receive the meeting summary",
+        "and the full plain-text transcript at this address.",
+      ].join("\n"),
+    },
+    cfg
+  );
 }
 
 // Returns { email, id } for the Chrome profile signed into the browser,

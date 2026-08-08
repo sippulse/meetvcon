@@ -65,7 +65,8 @@ label .hint {
 input[type="url"],
 input[type="password"],
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+select {
   width: 100%;
   padding: 8px 10px;
   font: inherit;
@@ -78,7 +79,8 @@ input[type="number"] {
 input[type="url"]:focus,
 input[type="password"]:focus,
 input[type="text"]:focus,
-input[type="number"]:focus {
+input[type="number"]:focus,
+select:focus {
   outline: none;
   border-color: #006eb7;
   box-shadow: 0 0 0 2px rgba(0, 110, 183, 0.15);
@@ -148,6 +150,22 @@ button[type="button"]:hover {
   color: #d93025;
 }
 
-#intervalLabel.hidden {
+.actions-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.actions-inline:empty {
   display: none;
+}
+
+.hint {
+  font-size: 12px;
+  color: #5f6368;
+}
+
+.hidden {
+  display: none !important;
 }

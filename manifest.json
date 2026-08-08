@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "MeetVcon",
-  "version": "0.1.0",
-  "description": "Transcribe Google Meet calls using built-in captions and POST the transcript as a vCon to a user-configured webhook.",
+  "version": "0.2.0",
+  "description": "Transcribe Google Meet calls using built-in captions, POST the transcript as a vCon to a user-configured webhook, and optionally email yourself an on-device AI summary + transcript.",
   "minimum_chrome_version": "120",
 
   "icons": {

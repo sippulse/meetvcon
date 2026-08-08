@@ -28,6 +28,15 @@
     snapshotIntervalMin: 5,
     includeSpeakerEmail: false,
     includeCapturerEmail: true, // include Chrome profile email in vCon metadata
+    // Email delivery (summary + plain-text transcript at end of call).
+    emailEnabled: false,
+    emailProvider: "resend", // "resend" | "sendgrid" | "mailgun"
+    emailApiKey: "",
+    emailFrom: "",
+    emailTo: "", // comma-separated; empty = Chrome profile email
+    emailMailgunDomain: "",
+    // On-device AI summary (Chrome built-in Summarizer / Gemini Nano).
+    summaryEnabled: false,
   };
 
   async function getConfig() {
@@ -77,6 +86,16 @@
     await chrome.storage.local.set({ meetings: log.slice(0, 100) });
   }
 
+  // Shallow-merge patch into the log entry with the given uuid.
+  async function updateMeetingLog(uuid, patch) {
+    const log = await getMeetingsLog();
+    const idx = log.findIndex((m) => m.uuid === uuid);
+    if (idx < 0) return false;
+    log[idx] = { ...log[idx], ...patch };
+    await chrome.storage.local.set({ meetings: log });
+    return true;
+  }
+
   async function removeMeetingFromLog(uuid) {
     const log = await getMeetingsLog();
     const next = log.filter((m) => m.uuid !== uuid);
@@ -96,6 +115,7 @@
     setQueue,
     getMeetingsLog,
     appendMeetingLog,
+    updateMeetingLog,
     removeMeetingFromLog,
   };
 })(typeof self !== "undefined" ? self : window);
