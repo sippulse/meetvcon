@@ -1,492 +1,593 @@
-// MV3 service worker. Responsibilities:
-//   - Receive call_started / call_ended messages from content scripts.
-//   - Schedule periodic snapshot delivery (chrome.alarms) when delivery
-//     mode is "periodic_snapshot".
-//   - Assemble vCon docs from session-storage meeting records.
-//   - POST to user-configured webhook with optional Bearer auth and
-//     optional HMAC-SHA256 signature.
-//   - On failure: enqueue with exponential backoff, retry via alarms.
-//   - Log delivered meetings to chrome.storage.local.meetings.
-//
-// Imports below execute the lib files for their side effects (each
-// attaches its API to self.MeetVcon).
+// SipPulse Meet Capture service worker: encrypted crash recovery, fixed
+// SipPulse delivery, retry scheduling, and SipPulse AI audio orchestration.
 
 import "../lib/logger.js";
+import "../lib/config.js";
 import "../lib/storage.js";
 import "../lib/vcon.js";
+import "../lib/retry-policy.js";
+import {
+  getSecureRecord,
+  putSecureRecord,
+  removeSecureRecord,
+} from "./secure-store.js";
 
-const { log, storage, vcon } = self.MeetVcon;
-const VERSION = "0.1.0";
-const USER_AGENT = `MeetVcon/${VERSION}`;
+const { log, storage, vcon, retryPolicy } = self.MeetVcon;
+const VERSION = "0.2.0";
+const ACTIVE_INDEX_KEY = "activeMeetingIndex";
+const AI_SESSIONS_KEY = "aiSessions";
+const RECOVERY_ALARM = "recovery-scan";
+const OFFSCREEN_CLEANUP_ALARM = "offscreen-cleanup";
+const STALE_MEETING_MS = 90_000;
+const FETCH_TIMEOUT_MS = 30_000;
+const OFFSCREEN_PATH = "src/offscreen/offscreen.html";
+const finalizationTasks = new Map();
 
-// Backoff schedule in minutes. Index = attempt number (0-based).
-const BACKOFF_MIN = [0.5, 2, 10, 60, 360, 1440];
-
-// chrome.storage.session defaults to TRUSTED_CONTEXTS (worker + extension
-// pages only). The content script writes the in-flight meeting record there
-// and the worker reads it back at call_ended / snapshot time — both sides
-// must share access. Widen on every SW startup since the access level is
-// per-session and not persisted across browser restarts.
-chrome.storage.session
-  .setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
-  .catch((err) => log.warn("setAccessLevel failed", err));
-
-// ---- lifecycle ------------------------------------------------------
-
-self.addEventListener("install", () => {
-  log.info("service worker installed", VERSION);
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === "install") chrome.runtime.openOptionsPage();
+  migrateLegacyStorage()
+    .then(initialize)
+    .catch((error) => log.error("initialization failed", error));
 });
 
-self.addEventListener("activate", () => {
-  log.info("service worker activated");
+chrome.runtime.onStartup.addListener(() => {
+  initialize().catch((error) => log.error("startup failed", error));
 });
 
-// ---- message handling -----------------------------------------------
+initialize().catch((error) => log.error("worker initialization failed", error));
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return false;
-  log.debug("message", msg.type, msg);
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message?.type || message.target === "offscreen") return false;
 
-  switch (msg.type) {
-    case "call_started":
-      handleCallStarted(msg.meetingId, msg.uuid)
-        .then(() => sendResponse({ ok: true }))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
+  let task;
+  switch (message.type) {
+    case "active_meeting_get":
+      task = getActiveMeeting(message.meetingId).then((record) => ({ ok: true, record }));
+      break;
+    case "active_meeting_put":
+      task = putActiveMeeting(message.record).then(() => ({ ok: true }));
+      break;
+    case "active_meeting_remove":
+      task = removeActiveMeeting(message.meetingId).then(() => ({ ok: true }));
+      break;
     case "call_ended":
-      handleCallEnded(msg.meetingId)
-        .then(() => sendResponse({ ok: true }))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
-    case "test_webhook":
-      handleTestWebhook()
-        .then((result) => sendResponse(result))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
+      task = finalizeMeeting(message.meetingId, "final");
+      break;
+    case "capture_cancelled":
+      task = cancelMeeting(message.meetingId).then(() => ({ ok: true }));
+      break;
+    case "prepare_ai_capture":
+      task = prepareAiCapture(sender).then(() => ({ ok: true }));
+      break;
+    case "ai_capture_started":
+      task = markAiCapture(message.meetingId, true).then(() => ({ ok: true }));
+      break;
     case "retry_queue_item":
-      retryQueueItem(msg.id, /*manual=*/ true)
-        .then((result) => sendResponse(result))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
+      task = retryQueueItem(message.id, true);
+      break;
     case "discard_queue_item":
-      discardQueueItem(msg.id)
-        .then(() => sendResponse({ ok: true }))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
-    case "replay_meeting":
-      replayMeeting(msg.uuid)
-        .then((result) => sendResponse(result))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
-    case "remove_meeting":
-      storage
-        .removeMeetingFromLog(msg.uuid)
-        .then((removed) => sendResponse({ ok: true, removed }))
-        .catch((err) => sendResponse({ ok: false, error: String(err) }));
-      return true;
-
+      task = discardQueueItem(message.id).then(() => ({ ok: true }));
+      break;
+    case "test_connection":
+      task = handleTestConnection();
+      break;
+    case "get_popup_state":
+      task = getPopupState();
+      break;
     default:
       return false;
   }
+
+  task
+    .then(sendResponse)
+    .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+  return true;
 });
 
-async function replayMeeting(uuid) {
-  if (!uuid) return { ok: false, error: "missing uuid" };
-  const meetings = await storage.getMeetingsLog();
-  const m = meetings.find((x) => x.uuid === uuid);
-  if (!m || !m.vcon) return { ok: false, error: "vcon_not_stored" };
-  const cfg = await storage.getConfig();
-  if (!cfg.webhookUrl) return { ok: false, error: "No webhook URL configured" };
-  const result = await postWebhook(m.vcon, cfg, "replay");
-  if (result.ok) {
-    log.info("replay delivered", uuid, "status", result.status);
-  } else {
-    log.warn("replay failed", uuid, result.error);
+chrome.alarms.onAlarm.addListener((alarm) => {
+  const task = alarm.name.startsWith("retry:")
+    ? retryQueueItem(alarm.name.slice("retry:".length), false)
+    : alarm.name === RECOVERY_ALARM
+    ? recoverStaleMeetings()
+    : alarm.name === OFFSCREEN_CLEANUP_ALARM
+    ? closeOffscreenIfIdle()
+    : null;
+  task?.catch((error) => log.error("alarm failed", alarm.name, error));
+});
+
+async function initialize() {
+  chrome.alarms.create(RECOVERY_ALARM, { periodInMinutes: 1 });
+  const queue = await storage.getQueue();
+  for (const item of queue) {
+    if (item.state !== "queued") continue;
+    const delayMs = Math.max(0, Date.parse(item.nextAttemptAt) - Date.now());
+    chrome.alarms.create(retryAlarmName(item.id), {
+      delayInMinutes: Math.max(0.5, delayMs / 60_000),
+    });
   }
+}
+
+async function migrateLegacyStorage() {
+  const legacy = await chrome.storage.local.get([
+    "storageSchemaVersion",
+    "config",
+    "meetings",
+    "queue",
+  ]);
+  if ((legacy.storageSchemaVersion || 0) >= 2) return;
+
+  // v0.1 stored credentials and transcript bodies as plaintext. They cannot
+  // be carried into the SipPulse-only security model.
+  await chrome.storage.local.remove(["config", "meetings"]);
+  if (legacy.queue?.some((item) => item.vcon || item.url)) {
+    await chrome.storage.local.set({ queue: [] });
+  }
+  await chrome.storage.local.set({ storageSchemaVersion: 2 });
+}
+
+async function readMap(key) {
+  const result = await chrome.storage.local.get(key);
+  return result[key] || {};
+}
+
+async function writeMap(key, value) {
+  await chrome.storage.local.set({ [key]: value });
+}
+
+async function putActiveMeeting(record) {
+  if (!record?.meetingId || !record?.uuid) throw new Error("Invalid meeting record");
+  await putSecureRecord(`active:${record.meetingId}`, record);
+  const index = await readMap(ACTIVE_INDEX_KEY);
+  index[record.meetingId] = {
+    uuid: record.uuid,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeMap(ACTIVE_INDEX_KEY, index);
+  await storage.setDeliveryStatus({
+    state: "capturing",
+    source: (await isAiCaptureActive(record.meetingId))
+      ? "sippulse_ai"
+      : "google_captions",
+  });
+}
+
+async function getActiveMeeting(meetingId) {
+  if (!meetingId) return null;
+  return getSecureRecord(`active:${meetingId}`);
+}
+
+async function removeActiveMeeting(meetingId) {
+  if (!meetingId) return;
+  await removeSecureRecord(`active:${meetingId}`);
+  const index = await readMap(ACTIVE_INDEX_KEY);
+  delete index[meetingId];
+  await writeMap(ACTIVE_INDEX_KEY, index);
+}
+
+function finalizeMeeting(meetingId, deliveryKind) {
+  if (finalizationTasks.has(meetingId)) return finalizationTasks.get(meetingId);
+  const task = handleCallEnded(meetingId, deliveryKind).finally(() => {
+    finalizationTasks.delete(meetingId);
+  });
+  finalizationTasks.set(meetingId, task);
+  return task;
+}
+
+async function handleCallEnded(meetingId, deliveryKind) {
+  if (!meetingId) return { ok: false, error: "Missing meeting id" };
+  const record = await getActiveMeeting(meetingId);
+  if (!record) return { ok: false, error: "Meeting record not found" };
+  const config = await storage.getConfig();
+  if (!config.captureEnabled) {
+    await cancelMeeting(meetingId);
+    return { ok: false, error: "Capture was disabled by SipPulse" };
+  }
+
+  const aiActive = await isAiCaptureActive(meetingId);
+  const profile = await getProfileUser();
+  if (!isSipPulseEmail(profile?.email)) {
+    await storage.setDeliveryStatus({
+      state: "needs_attention",
+      error: "Sign in to Chrome with a @sippulse.com account",
+    });
+    return { ok: false, error: "SipPulse collaborator email unavailable" };
+  }
+  const fallback = assembleVcon(
+    record,
+    deliveryKind,
+    aiActive ? "google_captions_fallback" : "google_captions",
+    profile
+  );
+
+  if (aiActive) {
+    let upload;
+    if (!config.configured) {
+      await chrome.runtime
+        .sendMessage({
+          target: "offscreen",
+          type: "ai_capture_cancel",
+          meetingId,
+        })
+        .catch(() => {});
+      upload = { ok: false, error: config.error };
+    } else {
+      try {
+        upload = await chrome.runtime.sendMessage({
+          target: "offscreen",
+          type: "ai_capture_stop",
+          meetingId,
+          endpointUrl: config.endpointUrl,
+          bearerToken: config.bearerToken,
+          vcon: fallback,
+          deliveryKind,
+        });
+      } catch (error) {
+        upload = { ok: false, error: error.message || String(error) };
+      }
+    }
+    await markAiCapture(meetingId, false);
+    await closeOffscreenIfIdle();
+    if (upload?.ok) {
+      await removeQueuedForMeeting(fallback.uuid);
+      await removeActiveMeeting(meetingId);
+      await storage.setDeliveryStatus({
+        state: "processing",
+        source: "sippulse_ai",
+        requestId: upload.requestId || null,
+        lastSuccessAt: new Date().toISOString(),
+      });
+      return upload;
+    }
+    log.warn("SipPulse AI upload failed; sending Google captions", upload?.error);
+  }
+
+  if (!record.utterances?.length) {
+    await removeActiveMeeting(meetingId);
+    await storage.setDeliveryStatus({
+      state: "needs_attention",
+      error: "No audio or Google captions were captured",
+    });
+    return { ok: false, error: "No transcript captured" };
+  }
+
+  const result = await deliverVcon(fallback, deliveryKind);
+  await removeActiveMeeting(meetingId);
   return result;
 }
 
-// ---- call lifecycle -------------------------------------------------
-
-async function handleCallStarted(meetingId, uuid) {
-  if (!meetingId) return;
-  const cfg = await storage.getConfig();
-  if (cfg.deliveryMode === "periodic_snapshot") {
-    const interval = clamp(cfg.snapshotIntervalMin || 5, 1, 60);
-    chrome.alarms.create(snapshotAlarmName(meetingId), {
-      periodInMinutes: interval,
-      delayInMinutes: interval, // first fire after one full interval
-    });
-    log.info(
-      "scheduled snapshot alarm for",
-      meetingId,
-      "every",
-      interval,
-      "min"
-    );
-  }
-}
-
-async function handleCallEnded(meetingId) {
-  if (!meetingId) return;
-  await chrome.alarms.clear(snapshotAlarmName(meetingId));
-  const record = await storage.getMeeting(meetingId);
-  if (!record) {
-    log.warn("call_ended but no meeting record found", meetingId);
-    return;
-  }
-  if (!record.utterances || record.utterances.length === 0) {
-    log.info("skipping delivery: no utterances captured for", meetingId);
-    await storage.appendMeetingLog({
-      uuid: record.uuid,
-      meetingId: record.meetingId,
-      subject: record.subject,
-      startedAt: record.startedAt,
-      endedAt: new Date().toISOString(),
-      utteranceCount: 0,
-      status: "skipped_no_captions",
-    });
-    await storage.deleteMeeting(meetingId);
-    return;
-  }
-  await deliverMeeting(record, "final");
-  await storage.deleteMeeting(meetingId);
-}
-
-// ---- alarms ---------------------------------------------------------
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name.startsWith("snapshot:")) {
-    const meetingId = alarm.name.slice("snapshot:".length);
-    await handleSnapshotAlarm(meetingId);
-  } else if (alarm.name.startsWith("retry:")) {
-    const id = alarm.name.slice("retry:".length);
-    await retryQueueItem(id, /*manual=*/ false);
-  }
-});
-
-async function handleSnapshotAlarm(meetingId) {
-  const record = await storage.getMeeting(meetingId);
-  if (!record || !record.utterances || record.utterances.length === 0) {
-    log.debug("snapshot alarm: nothing to send for", meetingId);
-    return;
-  }
-  await deliverMeeting(record, "snapshot");
-}
-
-const snapshotAlarmName = (id) => `snapshot:${id}`;
-const retryAlarmName = (id) => `retry:${id}`;
-
-// ---- delivery -------------------------------------------------------
-
-async function deliverMeeting(record, deliveryKind) {
-  const cfg = await storage.getConfig();
-  if (!cfg.webhookUrl) {
-    log.warn("no webhook URL configured; skipping", deliveryKind, record.meetingId);
-    return;
-  }
-
-  const capturedByUser = cfg.includeCapturerEmail
-    ? await getProfileUser()
-    : null;
-
-  const vConDoc = vcon.assemble(record, {
-    capturedBy: USER_AGENT,
+function assembleVcon(record, deliveryKind, transcriptionSource, profile) {
+  return vcon.assemble(record, {
+    capturedBy: `SipPulse Meet Capture/${VERSION}`,
     deliveryKind,
-    capturedByUser,
+    transcriptionSource,
+    capturedByUser: profile,
   });
+}
 
-  const result = await postWebhook(vConDoc, cfg, deliveryKind);
+async function deliverRecord(record, deliveryKind, source) {
+  const profile = await getProfileUser();
+  if (!isSipPulseEmail(profile?.email)) {
+    const error = "Sign in to Chrome with a @sippulse.com account";
+    await storage.setDeliveryStatus({ state: "needs_attention", error });
+    return { ok: false, error };
+  }
+  return deliverVcon(
+    assembleVcon(record, deliveryKind, source, profile),
+    deliveryKind
+  );
+}
+
+async function deliverVcon(vconDocument, deliveryKind) {
+  const config = await storage.getConfig();
+  const result = await postVcon(
+    vconDocument,
+    config.endpointUrl,
+    config.bearerToken,
+    deliveryKind
+  );
   if (result.ok) {
-    log.info(
-      "delivered",
-      deliveryKind,
-      record.meetingId,
-      "→",
-      cfg.webhookUrl,
-      "status",
-      result.status
-    );
-    if (deliveryKind === "final") {
-      await storage.appendMeetingLog({
-        uuid: record.uuid,
-        meetingId: record.meetingId,
-        subject: record.subject,
-        startedAt: record.startedAt,
-        endedAt: new Date().toISOString(),
-        utteranceCount: record.utterances?.length || 0,
-        status: "delivered",
-        vcon: vConDoc,
-      });
-    }
-    return;
+    await removeQueuedForMeeting(vconDocument.uuid);
+    await storage.setDeliveryStatus({
+      state: "delivered",
+      source: vconDocument.attachments?.[0]?.body?.transcription_source,
+      lastSuccessAt: new Date().toISOString(),
+      error: "",
+    });
+    return result;
   }
 
-  log.warn("delivery failed", deliveryKind, record.meetingId, result.error);
-  await enqueue({
-    vcon: vConDoc,
-    url: cfg.webhookUrl,
-    deliveryKind,
-    error: result.error,
-  });
+  await enqueue(vconDocument, config.endpointUrl, deliveryKind, result.error);
+  return { ok: false, queued: true, error: result.error };
 }
 
-async function postWebhook(vConDoc, cfg, deliveryKind) {
-  if (!/^https:\/\//i.test(cfg.webhookUrl)) {
-    return { ok: false, error: "Webhook URL must use HTTPS" };
-  }
-  let host;
-  try {
-    host = new URL(cfg.webhookUrl).hostname;
-  } catch {
-    return { ok: false, error: "Invalid webhook URL" };
-  }
-  const has = await chrome.permissions.contains({
-    origins: [`https://${host}/*`],
+async function postVcon(document, endpointUrl, bearerToken, deliveryKind) {
+  const config = self.MeetVcon.config.normalize({
+    EndpointUrl: endpointUrl,
+    BearerToken: bearerToken,
   });
-  if (!has) {
-    return {
-      ok: false,
-      error: `No host permission for ${host}. Open MeetVcon options and re-save the webhook URL to grant access.`,
-    };
-  }
-  const body = JSON.stringify(vConDoc);
+  if (!config.configured) return { ok: false, error: config.error };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   const headers = {
     "Content-Type": "application/vcon+json",
-    "X-MeetVcon-Version": VERSION,
-    "X-MeetVcon-Delivery": deliveryKind,
+    "X-SipPulse-Delivery": deliveryKind,
+    "X-SipPulse-Transcription-Source":
+      document.attachments?.[0]?.body?.transcription_source || "google_captions",
   };
-  // Note: the User-Agent header is set by Chrome and cannot be overridden
-  // from a service worker fetch — we use X-MeetVcon-Version instead.
-  if (cfg.bearerToken) {
-    headers["Authorization"] = `Bearer ${cfg.bearerToken}`;
-  }
-  if (cfg.hmacSecret) {
-    const sig = await hmacSha256Hex(cfg.hmacSecret, body);
-    headers["X-MeetVcon-Signature"] = `sha256=${sig}`;
-  }
+  if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
+
   try {
-    const resp = await fetch(cfg.webhookUrl, {
+    const response = await fetch(endpointUrl, {
       method: "POST",
       headers,
-      body,
+      body: JSON.stringify(document),
+      signal: controller.signal,
     });
-    if (resp.ok) return { ok: true, status: resp.status };
-    return { ok: false, error: `HTTP ${resp.status}`, status: resp.status };
-  } catch (err) {
-    return { ok: false, error: err?.message || String(err) };
+    if (response.ok) return { ok: true, status: response.status };
+    return { ok: false, error: `HTTP ${response.status}`, status: response.status };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.name === "AbortError" ? "Request timed out" : error.message,
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-async function hmacSha256Hex(secret, data) {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(data));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-// ---- queue ----------------------------------------------------------
-
-async function enqueue({ vcon: vConDoc, url, deliveryKind, error }) {
+async function enqueue(document, endpointUrl, deliveryKind, error) {
   const queue = await storage.getQueue();
-
-  // Snapshot dedup: a newer snapshot for the same UUID supersedes any
-  // earlier queued snapshot — no point retrying stale snapshots.
-  let pruned = queue;
-  if (deliveryKind === "snapshot") {
-    pruned = queue.filter((q) => {
-      if (q.deliveryKind !== "snapshot") return true;
-      if (q.vcon?.uuid !== vConDoc.uuid) return true;
-      // Cancel its retry alarm.
-      chrome.alarms.clear(retryAlarmName(q.id));
-      return false;
-    });
+  const obsolete = queue.filter((item) => item.uuid === document.uuid);
+  for (const item of obsolete) {
+    await removeSecureRecord(`queue:${item.id}`);
+    await chrome.alarms.clear(retryAlarmName(item.id));
   }
+  queue.splice(
+    0,
+    queue.length,
+    ...queue.filter((item) => !obsolete.some((old) => old.id === item.id))
+  );
 
   const id = vcon.uuidv4();
-  const attempts = 0;
-  const delayMin = BACKOFF_MIN[0];
+  await putSecureRecord(`queue:${id}`, { document, endpointUrl });
   const item = {
     id,
-    vcon: vConDoc,
-    url,
+    uuid: document.uuid,
     deliveryKind,
-    attempts,
-    nextAttemptAt: new Date(Date.now() + delayMin * 60_000).toISOString(),
+    attempts: 0,
+    state: "queued",
+    nextAttemptAt: new Date(
+      Date.now() + retryPolicy.DELAYS_MINUTES[0] * 60_000
+    ).toISOString(),
     lastError: error,
   };
-  pruned.push(item);
-  await storage.setQueue(pruned);
-  chrome.alarms.create(retryAlarmName(id), { delayInMinutes: delayMin });
-  log.info(
-    "queued for retry",
-    deliveryKind,
-    "in",
-    delayMin,
-    "min (id:",
-    id,
-    ")"
-  );
+  queue.push(item);
+  await storage.setQueue(queue);
+  chrome.alarms.create(retryAlarmName(id), {
+    delayInMinutes: retryPolicy.DELAYS_MINUTES[0],
+  });
+  await storage.setDeliveryStatus({ state: "queued", error });
 }
 
 async function retryQueueItem(id, manual) {
   const queue = await storage.getQueue();
-  const idx = queue.findIndex((q) => q.id === id);
-  if (idx < 0) {
-    log.debug("retry: item not found", id);
-    return { ok: false, error: "not_found" };
-  }
-  const item = queue[idx];
-  const cfg = await storage.getConfig();
-  const result = await postWebhook(item.vcon, cfg, item.deliveryKind);
+  const item = queue.find((candidate) => candidate.id === id);
+  if (!item) return { ok: false, error: "Queue item not found" };
+  const payload = await getSecureRecord(`queue:${id}`);
+  if (!payload) return { ok: false, error: "Encrypted payload not found" };
+
+  const config = await storage.getConfig();
+  const result = await postVcon(
+    payload.document,
+    payload.endpointUrl,
+    config.bearerToken,
+    item.deliveryKind
+  );
   if (result.ok) {
-    queue.splice(idx, 1);
-    await storage.setQueue(queue);
-    if (item.deliveryKind === "final") {
-      const v = item.vcon || {};
-      const meta = v.attachments?.find((a) => a.type === "meeting_metadata")?.body || {};
-      await storage.appendMeetingLog({
-        uuid: v.uuid,
-        meetingId: meta.meeting_code,
-        subject: v.subject,
-        startedAt: v.created_at,
-        endedAt: new Date().toISOString(),
-        utteranceCount: v.dialog?.length || 0,
-        status: "delivered",
-        vcon: v,
-      });
-    }
-    log.info("queue retry succeeded", id);
-    return { ok: true };
+    await removeSecureRecord(`queue:${id}`);
+    await storage.setQueue(queue.filter((candidate) => candidate.id !== id));
+    await storage.setDeliveryStatus({
+      state: "delivered",
+      lastSuccessAt: new Date().toISOString(),
+      error: "",
+    });
+    return result;
   }
 
+  item.lastError = result.error;
   if (manual) {
-    item.lastError = result.error;
+    item.state = "needs_attention";
+    item.nextAttemptAt = null;
     await storage.setQueue(queue);
+    await storage.setDeliveryStatus({
+      state: "needs_attention",
+      error: result.error,
+    });
     return { ok: false, error: result.error };
   }
 
-  item.attempts += 1;
-  item.lastError = result.error;
-  if (item.attempts >= BACKOFF_MIN.length) {
-    queue.splice(idx, 1);
-    await storage.setQueue(queue);
-    log.error("dropping queue item after max retries", id);
-    return { ok: false, error: "max_retries" };
+  const next = retryPolicy.afterFailure(item.attempts);
+  Object.assign(item, next);
+  if (item.state === "needs_attention") {
+    await storage.setDeliveryStatus({ state: "needs_attention", error: result.error });
+  } else {
+    const delayMs = Math.max(0, Date.parse(item.nextAttemptAt) - Date.now());
+    chrome.alarms.create(retryAlarmName(id), {
+      delayInMinutes: Math.max(0.5, delayMs / 60_000),
+    });
   }
-  const delayMin = BACKOFF_MIN[item.attempts];
-  item.nextAttemptAt = new Date(Date.now() + delayMin * 60_000).toISOString();
   await storage.setQueue(queue);
-  chrome.alarms.create(retryAlarmName(id), { delayInMinutes: delayMin });
-  log.info(
-    "retry failed; rescheduling",
-    id,
-    "attempt",
-    item.attempts,
-    "in",
-    delayMin,
-    "min"
-  );
   return { ok: false, error: result.error };
 }
 
 async function discardQueueItem(id) {
   const queue = await storage.getQueue();
-  const next = queue.filter((q) => q.id !== id);
-  await storage.setQueue(next);
+  await storage.setQueue(queue.filter((item) => item.id !== id));
+  await removeSecureRecord(`queue:${id}`);
   await chrome.alarms.clear(retryAlarmName(id));
 }
 
-// ---- test webhook ---------------------------------------------------
+async function removeQueuedForMeeting(uuid) {
+  const queue = await storage.getQueue();
+  const obsolete = queue.filter((item) => item.uuid === uuid);
+  for (const item of obsolete) {
+    await removeSecureRecord(`queue:${item.id}`);
+    await chrome.alarms.clear(retryAlarmName(item.id));
+  }
+  if (obsolete.length) {
+    await storage.setQueue(
+      queue.filter((item) => !obsolete.some((old) => old.id === item.id))
+    );
+  }
+}
 
-async function handleTestWebhook() {
-  const cfg = await storage.getConfig();
-  if (!cfg.webhookUrl) {
-    return { ok: false, error: "No webhook URL configured" };
+async function recoverStaleMeetings() {
+  const index = await readMap(ACTIVE_INDEX_KEY);
+  for (const [meetingId, metadata] of Object.entries(index)) {
+    if (Date.now() - Date.parse(metadata.updatedAt) < STALE_MEETING_MS) continue;
+    const record = await getActiveMeeting(meetingId);
+    const aiActive = await isAiCaptureActive(meetingId);
+    if (record && (record.utterances?.length || aiActive)) {
+      const result = await finalizeMeeting(meetingId, "recovered");
+      if (!result.ok && !result.queued) continue;
+    } else if (aiActive) {
+      await chrome.runtime
+        .sendMessage({
+          target: "offscreen",
+          type: "ai_capture_cancel",
+          meetingId,
+        })
+        .catch(() => {});
+    }
+    await markAiCapture(meetingId, false);
+    await removeActiveMeeting(meetingId);
+  }
+}
+
+async function cancelMeeting(meetingId) {
+  if (await isAiCaptureActive(meetingId)) {
+    await chrome.runtime
+      .sendMessage({
+        target: "offscreen",
+        type: "ai_capture_cancel",
+        meetingId,
+      })
+      .catch(() => {});
+  }
+  await markAiCapture(meetingId, false);
+  await closeOffscreenIfIdle();
+  await removeActiveMeeting(meetingId);
+  await storage.setDeliveryStatus({ state: "disabled_for_call", error: "" });
+}
+
+async function prepareAiCapture() {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_PATH)],
+  });
+  if (contexts.length) return;
+  await chrome.offscreen.createDocument({
+    url: OFFSCREEN_PATH,
+    reasons: ["USER_MEDIA"],
+    justification: "Record a user-approved Meet call for SipPulse AI transcription",
+  });
+  chrome.alarms.create(OFFSCREEN_CLEANUP_ALARM, { delayInMinutes: 1 });
+}
+
+async function markAiCapture(meetingId, active) {
+  const sessions = await readMap(AI_SESSIONS_KEY);
+  if (active) sessions[meetingId] = { startedAt: new Date().toISOString() };
+  else delete sessions[meetingId];
+  await writeMap(AI_SESSIONS_KEY, sessions);
+  if (active) {
+    await chrome.alarms.clear(OFFSCREEN_CLEANUP_ALARM);
+    await storage.setDeliveryStatus({ state: "capturing", source: "sippulse_ai" });
+  }
+}
+
+async function closeOffscreenIfIdle() {
+  const sessions = await readMap(AI_SESSIONS_KEY);
+  if (Object.keys(sessions).length) return;
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_PATH)],
+  });
+  if (contexts.length) await chrome.offscreen.closeDocument();
+}
+
+async function isAiCaptureActive(meetingId) {
+  const sessions = await readMap(AI_SESSIONS_KEY);
+  return !!sessions[meetingId];
+}
+
+async function getPopupState() {
+  const [consent, config, status, queue, activeMeetings, aiSessions, profile] =
+    await Promise.all([
+      storage.getConsent(),
+      storage.getConfig(),
+      storage.getDeliveryStatus(),
+      storage.getQueue(),
+      readMap(ACTIVE_INDEX_KEY),
+      readMap(AI_SESSIONS_KEY),
+      getProfileUser(),
+    ]);
+  return {
+    ok: true,
+    consented: !!consent?.accepted,
+    config: {
+      configured: config.configured,
+      captureEnabled: config.captureEnabled,
+      preferredTranscription: config.preferredTranscription,
+      error: config.error,
+    },
+    status,
+    queue,
+    activeMeetingIds: Object.keys(activeMeetings),
+    aiMeetingIds: Object.keys(aiSessions),
+    collaboratorEmail: profile?.email || "",
+  };
+}
+
+async function handleTestConnection() {
+  const profile = await getProfileUser();
+  if (!isSipPulseEmail(profile?.email)) {
+    return { ok: false, error: "Sign in to Chrome with a @sippulse.com account" };
   }
   const now = new Date().toISOString();
-  const testRecord = {
-    uuid: vcon.uuidv4(),
-    meetingId: "test-payload",
-    meetingUrl: "https://meet.google.com/test-payload",
-    subject: "MeetVcon test payload",
-    startedAt: now,
-    utterances: [
-      {
-        speaker: "MeetVcon",
-        text: "This is a test payload from the MeetVcon options page.",
-        start: now,
-        duration: 1,
-      },
-    ],
-    captionsEnabled: true,
-  };
-  const capturedByUser = cfg.includeCapturerEmail
-    ? await getProfileUser()
-    : null;
-  const doc = vcon.assemble(testRecord, {
-    capturedBy: USER_AGENT,
-    deliveryKind: "test",
-    capturedByUser,
-  });
-  return await postWebhook(doc, cfg, "test");
+  const document = assembleVcon(
+    {
+      uuid: vcon.uuidv4(),
+      meetingId: "connection-test",
+      meetingUrl: "https://meet.google.com/connection-test",
+      subject: "SipPulse connection test",
+      startedAt: now,
+      captionsEnabled: true,
+      utterances: [
+        { speaker: "SipPulse", text: "Connection test", start: now, duration: 1 },
+      ],
+    },
+    "test",
+    "synthetic",
+    profile
+  );
+  const config = await storage.getConfig();
+  return postVcon(document, config.endpointUrl, config.bearerToken, "test");
 }
 
-// Returns { email, id } for the Chrome profile signed into the browser,
-// or null if no profile is signed in / identity API unavailable.
-// Cached for the lifetime of the service worker (the profile rarely
-// changes, and getProfileUserInfo is essentially free, but caching also
-// lets us survive permission-removal edge cases gracefully).
-let _profileUserCache = undefined;
+let profileCache;
 async function getProfileUser() {
-  if (_profileUserCache !== undefined) return _profileUserCache;
-  if (!chrome.identity?.getProfileUserInfo) {
-    _profileUserCache = null;
-    return null;
+  if (profileCache !== undefined) return profileCache;
+  try {
+    const info = await chrome.identity.getProfileUserInfo({ accountStatus: "ANY" });
+    profileCache = info?.email ? { email: info.email, id: info.id || null } : null;
+  } catch (error) {
+    log.warn("profile lookup failed", error);
+    profileCache = null;
   }
-  return new Promise((resolve) => {
-    try {
-      chrome.identity.getProfileUserInfo(
-        { accountStatus: "ANY" },
-        (info) => {
-          if (chrome.runtime.lastError) {
-            log.warn("getProfileUserInfo error", chrome.runtime.lastError.message);
-            _profileUserCache = null;
-            resolve(null);
-            return;
-          }
-          if (info && info.email) {
-            _profileUserCache = { email: info.email, id: info.id || null };
-          } else {
-            _profileUserCache = null;
-          }
-          resolve(_profileUserCache);
-        }
-      );
-    } catch (err) {
-      log.warn("getProfileUserInfo threw", err);
-      _profileUserCache = null;
-      resolve(null);
-    }
-  });
+  return profileCache;
 }
 
-// ---- helpers --------------------------------------------------------
-
-function clamp(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, Number(n) || lo));
-}
+const retryAlarmName = (id) => `retry:${id}`;
+const isSipPulseEmail = (email) =>
+  typeof email === "string" && email.toLowerCase().endsWith("@sippulse.com");

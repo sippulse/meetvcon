@@ -5,7 +5,7 @@
   const ns = (root.MeetVcon = root.MeetVcon || {});
   if (ns.log) return;
 
-  const PREFIX = "[MeetVcon]";
+  const PREFIX = "[SipPulse Meet]";
   const DEBUG = true; // flip to false for production builds
 
   ns.log = {

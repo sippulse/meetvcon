@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "EndpointUrl": {
+      "title": "SipPulse transcript ingestion endpoint",
+      "description": "HTTPS URL on api.sippulse.com that receives vCon payloads.",
+      "type": "string"
+    },
+    "BearerToken": {
+      "title": "Temporary ingestion bearer token",
+      "description": "Optional pilot credential. Prefer SipPulse SSO for production.",
+      "type": "string"
+    },
+    "CaptureEnabled": {
+      "title": "Enable meeting capture",
+      "description": "Allows employees to capture Google Meet captions after consent.",
+      "type": "boolean"
+    },
+    "PreferredTranscription": {
+      "title": "Preferred transcription source",
+      "description": "SipPulse AI requires one user click per meeting; Google captions remain the fallback.",
+      "type": "string",
+      "enum": ["sippulse_ai", "google_captions"]
+    }
+  }
+}

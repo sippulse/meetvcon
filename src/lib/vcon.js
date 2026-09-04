@@ -71,9 +71,10 @@
       platform: "google_meet",
       meeting_code: record.meetingId,
       meeting_url: record.meetingUrl,
-      captured_by: opts.capturedBy || "MeetVcon",
+      captured_by: opts.capturedBy || "SipPulse Meet Capture",
       captions_enabled: record.captionsEnabled !== false,
       delivery_kind: opts.deliveryKind || "final",
+      transcription_source: opts.transcriptionSource || "google_captions",
     };
     if (opts.capturedByUser && opts.capturedByUser.email) {
       metadata.captured_by_user = {

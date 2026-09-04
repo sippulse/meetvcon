@@ -32,6 +32,16 @@
   opacity: 0.85;
 }
 
+.meetvcon-count,
+.meetvcon-consent {
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.meetvcon-consent {
+  max-width: 260px;
+}
+
 .meetvcon-actions {
   margin-top: 8px;
 }

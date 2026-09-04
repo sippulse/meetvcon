@@ -1,66 +1,108 @@
-// Content-script orchestrator. Runs on every meet.google.com page.
-// Lifecycle:
-//   - On load: start watchdog + capture machinery (idle until in a call).
-//   - Detect in-call transitions by polling selectors.isInCall().
-//   - On false→true: start a meeting record + transcript capture +
-//     notify the service worker.
-//   - On true→false: end the meeting + notify the service worker
-//     (which assembles the final vCon and POSTs).
+// Meet lifecycle controller. Capture fails closed until the employee accepts
+// the disclosure and the SipPulse-managed policy enables the extension.
 
 (function () {
   const ns = (window.MeetVcon = window.MeetVcon || {});
-  const { log, selectors, captionsWatchdog, transcriptCapture, inCallPanel } = ns;
+  const { log, selectors, storage, captionsWatchdog, transcriptCapture, inCallPanel } = ns;
 
-  if (!captionsWatchdog || !inCallPanel || !transcriptCapture) {
-    console.error(
-      "[MeetVcon] init failed — content script modules missing.",
-      Object.keys(ns)
-    );
+  if (!storage || !captionsWatchdog || !transcriptCapture || !inCallPanel) {
+    console.error("[SipPulse Meet] initialization failed", Object.keys(ns));
     return;
   }
 
-  log.info("content script loaded on", location.href);
-
-  inCallPanel.init();
-  captionsWatchdog.start();
-  transcriptCapture.start();
-
   let inCall = false;
+  let captureRunning = false;
+  let transitionRunning = false;
 
-  async function checkCallTransition() {
-    const now = selectors.isInCall();
-    if (now && !inCall) {
-      inCall = true;
-      log.info("call entered");
-      await transcriptCapture.startMeeting();
-    } else if (!now && inCall) {
-      inCall = false;
-      log.info("call exited");
-      await transcriptCapture.endMeeting();
+  async function capturePrerequisite() {
+    const state = await chrome.runtime.sendMessage({ type: "get_popup_state" });
+    if (!state?.consented) return "setup_required";
+    if (!state.collaboratorEmail?.toLowerCase().endsWith("@sippulse.com")) {
+      return "identity_required";
     }
+    if (!state.config.configured || !state.config.captureEnabled) {
+      return "managed_disabled";
+    }
+    return "ready";
   }
 
-  setInterval(checkCallTransition, 2_000);
-  checkCallTransition();
+  async function startCapture() {
+    const prerequisite = await capturePrerequisite();
+    if (prerequisite !== "ready") {
+      inCallPanel.render(prerequisite);
+      return;
+    }
 
-  // Also handle tab close while in a call. We can't await async work in
-  // beforeunload, but persistence runs every 5s, so the latest record is
-  // already in chrome.storage.session — the service worker can find it
-  // there on next wake-up if we don't get to send the call_ended message.
-  window.addEventListener("beforeunload", () => {
-    if (inCall) {
-      try {
-        chrome.runtime.sendMessage({
-          type: "call_ended",
-          meetingId: transcriptCapture.getMeeting()?.meetingId,
-          reason: "tab_closed",
-        });
-      } catch (e) {
-        // Ignore — service worker may already be evicted.
-      }
+    captionsWatchdog.clearOptOut();
+    captionsWatchdog.start();
+    transcriptCapture.start();
+    const meeting = await transcriptCapture.startMeeting();
+    captureRunning = !!meeting;
+    if (!meeting) inCallPanel.render("capture_error");
+  }
+
+  async function disableForCall() {
+    if (!captureRunning) return;
+    captionsWatchdog.optOut();
+    captionsWatchdog.stop();
+    transcriptCapture.stop();
+    await transcriptCapture.cancelMeeting();
+    captureRunning = false;
+    inCallPanel.render("opted_out");
+  }
+
+  async function resumeForCall() {
+    await startCapture();
+  }
+
+  async function enterCall() {
+    inCallPanel.init({
+      onDisable: disableForCall,
+      onResume: resumeForCall,
+      onOpenSetup: () => chrome.runtime.openOptionsPage(),
+    });
+    await startCapture();
+  }
+
+  async function leaveCall() {
+    if (captureRunning) {
+      await transcriptCapture.endMeeting();
+      captureRunning = false;
     }
     captionsWatchdog.stop();
     transcriptCapture.stop();
     inCallPanel.destroy();
+  }
+
+  async function checkCallTransition() {
+    if (transitionRunning) return;
+    const next = selectors.isInCall();
+    if (next === inCall) return;
+    transitionRunning = true;
+    try {
+      inCall = next;
+      if (inCall) await enterCall();
+      else await leaveCall();
+    } catch (error) {
+      log.error("call transition failed", error);
+      inCallPanel.render("capture_error");
+    } finally {
+      transitionRunning = false;
+    }
+  }
+
+  const lifecycleTimer = setInterval(checkCallTransition, 2_000);
+  checkCallTransition();
+
+  window.addEventListener("beforeunload", () => {
+    clearInterval(lifecycleTimer);
+    if (captureRunning) {
+      chrome.runtime
+        .sendMessage({
+          type: "call_ended",
+          meetingId: transcriptCapture.getMeeting()?.meetingId,
+        })
+        .catch(() => {});
+    }
   });
 })();

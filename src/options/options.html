@@ -1,89 +1,58 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>MeetVcon Options</title>
-  <link rel="stylesheet" href="options.css" />
-</head>
-<body>
-  <main>
-    <h1>MeetVcon</h1>
-    <p class="intro">
-      MeetVcon transcribes your Google Meet calls using the browser's built-in
-      captions and POSTs the transcript as a
-      <a href="https://datatracker.ietf.org/wg/vcon/about/" target="_blank" rel="noreferrer">vCon</a>
-      JSON document to the webhook below.
-    </p>
+  <head>
+    <meta charset="utf-8" />
+    <title>SipPulse Meet Capture</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">SIPPULSE INTERNAL</p>
+      <h1>Meet Capture</h1>
+      <p class="intro">
+        Save a diarized meeting transcript to SipPulse CRM and send a copy to
+        the capturing collaborator's company email.
+      </p>
 
-    <form id="form">
-      <fieldset>
-        <legend>Webhook</legend>
+      <section class="card" aria-labelledby="disclosure-title">
+        <h2 id="disclosure-title">Before you enable capture</h2>
+        <ul>
+          <li>Google caption text is captured automatically as a fallback.</li>
+          <li>High-quality mode records the Meet tab and your microphone only after you start it.</li>
+          <li>Audio is sent to SipPulse for transcription with <code>pulse-telephony</code>, speaker diarization, and automatic language detection.</li>
+          <li>The final vCon is stored in SipPulse CRM and the diarized transcript is emailed to <strong id="email">your company email</strong>.</li>
+        </ul>
+        <p>
+          Use capture only when meeting participants have been informed and the
+          recording is permitted by company policy and applicable law.
+        </p>
+        <div class="actions">
+          <button id="accept" type="button">I understand — enable capture</button>
+          <button id="revoke" type="button" class="secondary hidden">Disable capture</button>
+        </div>
+      </section>
 
-        <label>
-          <span class="lbl">Webhook URL <span class="req">*</span></span>
-          <input type="url" id="webhookUrl" placeholder="https://your.server/webhook" required />
-          <span class="hint">Must use HTTPS. The transcript is POSTed as <code>application/vcon+json</code>.</span>
-        </label>
+      <section class="card" aria-labelledby="status-title">
+        <h2 id="status-title">Connection</h2>
+        <dl>
+          <div><dt>Configuration</dt><dd id="configuration">Checking…</dd></div>
+          <div><dt>Capture</dt><dd id="captureStatus">Checking…</dd></div>
+          <div><dt>Preferred transcription</dt><dd id="provider">Checking…</dd></div>
+        </dl>
+        <div class="actions">
+          <button id="test" type="button" class="secondary">Test SipPulse connection</button>
+          <span id="message" aria-live="polite"></span>
+        </div>
+      </section>
 
-        <label>
-          <span class="lbl">Bearer token (optional)</span>
-          <input type="password" id="bearerToken" autocomplete="off" placeholder="" />
-          <span class="hint">Sent as <code>Authorization: Bearer &lt;token&gt;</code>.</span>
-        </label>
-
-        <label>
-          <span class="lbl">HMAC signing secret (optional)</span>
-          <input type="password" id="hmacSecret" autocomplete="off" placeholder="" />
-          <span class="hint">If set, payloads are signed: <code>X-MeetVcon-Signature: sha256=&lt;hex&gt;</code> (HMAC-SHA256 over the raw body).</span>
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Delivery mode</legend>
-
-        <label class="radio">
-          <input type="radio" name="deliveryMode" id="modeEnd" value="end_of_call" />
-          <span><strong>End of call</strong>. One POST when the meeting ends. Simplest. Risk: data lost if the tab crashes mid-call.</span>
-        </label>
-
-        <label class="radio">
-          <input type="radio" name="deliveryMode" id="modeSnap" value="periodic_snapshot" />
-          <span><strong>Periodic snapshot</strong>. Every N minutes during the call, POST a cumulative snapshot. Same vCon UUID across snapshots; receiver upserts. Final POST at end-of-call carries header <code>X-MeetVcon-Delivery: final</code>.</span>
-        </label>
-
-        <label id="intervalLabel">
-          <span class="lbl">Snapshot interval (minutes)</span>
-          <input type="number" id="snapshotIntervalMin" min="1" max="60" step="1" />
-          <span class="hint">Valid range 1–60. Default 5.</span>
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Privacy</legend>
-
-        <label class="checkbox">
-          <input type="checkbox" id="includeCapturerEmail" />
-          <span>
-            Include my Chrome profile email as the capturer
-            (<code>attachments[].body.captured_by_user.email</code>). On by default.
-            Identifies which user ran the extension; useful for routing transcripts
-            in your receiver. Turn off for anonymized capture.
-          </span>
-        </label>
-
-        <label class="checkbox">
-          <input type="checkbox" id="includeSpeakerEmail" />
-          <span>Include other speakers' emails in vCon when Meet exposes them (off by default)</span>
-        </label>
-      </fieldset>
-
-      <div class="actions">
-        <button type="submit" id="save">Save</button>
-        <button type="button" id="test">Send test payload</button>
-        <span id="status" aria-live="polite"></span>
-      </div>
-    </form>
-  </main>
-  <script src="options.js"></script>
-</body>
+      <p class="footnote">
+        Configuration is managed centrally by SipPulse. See the
+        <a href="https://www.sippulse.com/politica-de-privacidade" target="_blank" rel="noreferrer">privacy policy</a>.
+      </p>
+    </main>
+    <script src="../lib/logger.js"></script>
+    <script src="../lib/config.js"></script>
+    <script src="../lib/storage.js"></script>
+    <script src="options.js"></script>
+  </body>
 </html>

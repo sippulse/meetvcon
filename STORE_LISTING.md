@@ -1,105 +1,46 @@
-# Chrome Web Store listing copy
+# Private Chrome Web Store Submission
 
-Copy-paste into the [Developer Dashboard](https://chromewebstore.google.com/devconsole) when submitting.
+## Name and summary
 
----
+**SipPulse Meet Capture**
 
-## Name
+Internal SipPulse extension that creates diarized Google Meet transcripts,
+stores vCon records in CRM, and emails the capturing collaborator.
 
-MeetVcon
+## Single purpose
 
-## Category
+For authorized Google Meet calls, capture speech, create a diarized transcript,
+store its vCon in SipPulse CRM, and email the transcript to the signed-in
+SipPulse collaborator.
 
-Productivity
+## Permission justifications
 
-## Summary (132 chars max)
+- `storage`: managed company configuration, consent state, encrypted crash
+  recovery, and delivery status.
+- `alarms`: failed-delivery retries and stale-meeting recovery.
+- `identity` / `identity.email`: identify the `@sippulse.com` collaborator who
+  receives the transcript and owns the CRM capture.
+- `activeTab` / `tabCapture`: after an explicit action, record the active Meet
+  tab for SipPulse AI transcription. Audio capture cannot start automatically.
+- `offscreen`: keep the user-approved audio recorder alive after the popup closes.
+- `https://meet.google.com/*`: detect calls, capture caption fallback, and show
+  the in-call disclosure/control panel.
+- `https://api.sippulse.com/*`: upload audio or vCon only to SipPulse ingestion.
 
-Send your Google Meet transcripts straight to your CRM, ticketing system, or LLM pipeline. vCon JSON. No bot, no SaaS.
+## Data disclosure
 
-## Detailed description
+The extension handles personal communications, website content, meeting
+metadata, speaker names, the collaborator's company email, and—only after a
+per-meeting action—tab and microphone audio. It transfers these data to
+SipPulse for CRM storage, transcript email, and SipPulse.ai processing. It does
+not sell data, advertise, or send data to user-selected third parties.
 
-You finish a Meet call. The transcript is locked inside someone else's SaaS.
+Publish [docs/PRIVACY.md](./docs/PRIVACY.md) at a dedicated SipPulse URL and use
+that URL in the dashboard. Provide reviewers with a managed test profile,
+policy configuration, test Meet instructions, and a test ingestion account.
 
-Otter, Tactiq, Scribbl, MeetScribe all keep your transcripts in their own cloud. To get them into your CRM, ticketing system, knowledge base, or LLM pipeline, you copy and paste, pay for an integration, or run a bot that joins the call as a participant.
+## Distribution
 
-MeetVcon takes a different path.
-
-It reads Google Meet's built-in browser captions. It assembles them into a vCon JSON document, the IETF standard for interoperable conversation data. Then it POSTs the document to the HTTPS webhook you configure. No bot joins your call. No data passes through MeetVcon servers, because there are no MeetVcon servers.
-
-### What you get
-
-- Webhook delivery in standard vCon format. Receivers parse it with any vCon-aware library, or treat it as plain JSON.
-- Two delivery modes. End of call, for the simplest receiver. Periodic snapshots, every 1 to 60 minutes, for near-real-time pipelines that need durability against tab crashes.
-- Authenticated webhooks. Optional Bearer token. Optional HMAC-SHA256 body signature.
-- Reliable delivery. Exponential-backoff retry queue persisted across browser restarts.
-- Captions stay on. The extension auto-enables Meet captions when you join a call and re-enables them within ten seconds if they get turned off.
-- Capturer attribution. The Chrome profile email is included in the vCon so your receiver can route or attribute by user. You can turn this off.
-- In-call panel. A small overlay shows capture status. Participants can see that transcription is active.
-
-### What it does not do
-
-- No external speech-to-text. No Whisper, no Deepgram, no Cloud STT. Transcription quality is whatever Meet's browser captions produce.
-- No audio or video recording. Transcripts only.
-- No third-party servers. No analytics. No telemetry.
-- No support for Zoom or Teams in this version. Meet only.
-
-### Privacy
-
-Transcripts never leave your device until POSTed to the webhook you configure. The extension does not phone home. Webhook URL, bearer token, and HMAC signing secret are stored only in chrome.storage.local on your machine, never in source code, never on a server.
-
-### Source
-
-Open source under the MIT License. Code, issues, and pull requests at https://github.com/sippulse/meetvcon
-
-### Install, point at your webhook, talk
-
-Right-click the icon, open Options, paste your webhook URL, click Save. Send a test payload to confirm. Join a Meet call. Your receiver gets a vCon when the call ends.
-
----
-
-## Single purpose declaration (for review)
-
-MeetVcon captures Google Meet captions during a call and POSTs the transcript as an IETF vCon JSON document to a user-configured HTTPS webhook. It does nothing else.
-
-## Per-permission justifications
-
-**`storage`**
-Save the webhook URL, optional Bearer token and HMAC secret, the user's delivery-mode preference, the recent-meetings list, and the pending-delivery retry queue. Used in chrome.storage.local for configuration and chrome.storage.session for the live transcript buffer.
-
-**`alarms`**
-Schedule the periodic snapshot delivery (when the user enables snapshot mode) and the exponential-backoff retry attempts when a webhook delivery fails.
-
-**`identity` and `identity.email`**
-Read the Chrome profile email via chrome.identity.getProfileUserInfo. The email is included in the vCon at attachments[0].body.captured_by_user.email so the receiver can identify which user captured the transcript. The user can disable this in the options page.
-
-**Host permission `https://meet.google.com/*`**
-Inject the content script that reads Meet's caption overlay, runs the captions watchdog, and shows the in-call status panel.
-
-**Optional host permission `https://*/*`**
-Required to POST the transcript to the webhook URL the user configures. Granted at runtime for the specific host the user enters in Options, never broadly. The service worker checks the permission before each delivery and refuses to send if it has been revoked.
-
-## Privacy practices (data usage disclosure)
-
-Personally identifiable information handled by the extension:
-
-- **Email address.** The Chrome profile email, when the user keeps the default "include capturer email" setting on. Included in the vCon document POSTed to the user's own webhook. Not transmitted anywhere else.
-- **Communications content.** Meeting transcripts produced by Google Meet's browser captions. Stored locally during the call and POSTed to the user's webhook.
-
-Statements required by the Chrome Web Store:
-
-- I do not sell or transfer user data to third parties, outside of the approved use cases.
-- I do not use or transfer user data for purposes that are unrelated to my item's single purpose.
-- I do not use or transfer user data to determine creditworthiness or for lending purposes.
-
-## Screenshots needed (1280x800 PNG)
-
-1. Options page with webhook URL, delivery mode, and "Send test payload" button.
-2. In-call panel on a Meet call, status set to "Capturing captions".
-3. Popup with one delivered meeting and one queued retry, showing Retry / Download / Discard actions.
-4. Optional. A receiver tab showing the incoming vCon JSON (e.g. webhook.site).
-
-## Privacy policy URL
-
-https://www.sippulse.com/politica-de-privacidade
-
-Note: this is the company-wide policy. It covers SipPulse telephony products and the lead-gen forms on the website, not the browser extension specifically. The Chrome Web Store reviewer may flag this and request an addendum or a dedicated MeetVcon privacy section. If that happens, the data-usage statements above (transcript text, capturer email when enabled, local storage only, POSTed to the user's own webhook, no third-party servers) are the content to add.
+Visibility: **Private**, restricted to the SipPulse Workspace organization.
+Use the SipPulse group publisher with two-step verification. Pilot with a small
+organizational unit before force installation.

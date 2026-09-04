@@ -1,9 +1,11 @@
 {
-  "name": "meetvcon",
-  "version": "0.1.0",
+  "name": "sippulse-meet-capture",
+  "version": "0.2.0",
   "private": true,
-  "description": "Tooling for the MeetVcon Chrome extension. The extension itself ships as plain Manifest V3 source.",
+  "description": "Internal SipPulse Chrome extension for diarized Google Meet transcription.",
   "scripts": {
+    "check": "find src tools tests -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test": "node --test tests/*.test.js",
     "screenshots": "node tools/screenshot.js"
   },
   "devDependencies": {

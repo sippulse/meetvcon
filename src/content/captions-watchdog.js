@@ -111,6 +111,10 @@
       notify("idle");
       return;
     }
+    if (state.optedOut) {
+      notify("opted_out");
+      return;
+    }
     if (selectors.areCaptionsActive()) {
       notify("active");
       return;
@@ -131,6 +135,7 @@
     if (!state.intervalId) return;
     clearInterval(state.intervalId);
     state.intervalId = null;
+    state.attemptTimestamps = [];
     log.info("captions watchdog stopped");
     notify("idle");
   }
@@ -144,6 +149,7 @@
   function clearOptOut() {
     state.optedOut = false;
     log.info("opt-out cleared");
+    tick();
   }
 
   function onStatusChange(fn) {

@@ -1,92 +1,88 @@
-// Minimal in-call status panel — v0.1 scaffold.
-// Shows: status indicator (active/enabling/off/opted_out), and a
-// "Disable for this call" / "Try again" button depending on state.
-//
-// Per PRD §6.5 / §10, the panel must be visible during capture for
-// consent transparency. Future iterations will add utterance count
-// and webhook target hostname.
+// Visible consent and capture control inside Google Meet.
 
 (function () {
   const ns = (window.MeetVcon = window.MeetVcon || {});
   if (ns.inCallPanel) return;
 
-  const { log } = ns;
-
   const PANEL_ID = "meetvcon-panel";
+  let handlers = {};
+  let currentStatus = "idle";
+  let countTimer = null;
+  let unsubscribe = null;
+
+  const STATES = {
+    active: ["meetvcon-dot--green", "Capturing Google captions"],
+    enabling: ["meetvcon-dot--amber", "Enabling Google captions…"],
+    opted_out: ["meetvcon-dot--grey", "Capture stopped for this call"],
+    setup_required: ["meetvcon-dot--amber", "Consent is required before capture"],
+    identity_required: ["meetvcon-dot--amber", "Sign in to Chrome with your SipPulse account"],
+    managed_disabled: ["meetvcon-dot--grey", "Capture is disabled by SipPulse"],
+    capture_error: ["meetvcon-dot--grey", "Capture could not start"],
+    idle: ["meetvcon-dot--grey", "Waiting for the meeting"],
+  };
+
+  function actionFor(status) {
+    if (status === "active" || status === "enabling") {
+      return ["disable", "Stop and discard this call"];
+    }
+    if (status === "opted_out") return ["resume", "Resume capture"];
+    if (status === "setup_required" || status === "identity_required") {
+      return ["setup", "Review setup"];
+    }
+    return null;
+  }
 
   function render(status) {
+    currentStatus = status;
     let panel = document.getElementById(PANEL_ID);
     if (!panel) {
-      panel = document.createElement("div");
+      panel = document.createElement("aside");
       panel.id = PANEL_ID;
       panel.className = "meetvcon-panel";
+      panel.setAttribute("aria-live", "polite");
       document.body.appendChild(panel);
     }
 
-    const dotClass =
-      status === "active"
-        ? "meetvcon-dot--green"
-        : status === "enabling"
-        ? "meetvcon-dot--amber"
-        : "meetvcon-dot--grey";
-
-    const statusText =
-      status === "active"
-        ? "Capturing captions"
-        : status === "enabling"
-        ? "Enabling captions…"
-        : status === "opted_out"
-        ? "Auto-enable disabled"
-        : status === "idle"
-        ? "Waiting for call"
-        : "Captions are off";
-
-    const actionHtml =
-      status === "active"
-        ? `<button class="meetvcon-btn" data-action="opt-out">Disable for this call</button>`
-        : status === "opted_out"
-        ? `<button class="meetvcon-btn" data-action="clear-opt-out">Re-enable</button>`
-        : status === "idle"
-        ? ""
-        : `<button class="meetvcon-btn" data-action="try-again">Try again</button>`;
-
+    const [dotClass, statusText] = STATES[status] || STATES.capture_error;
+    const action = actionFor(status);
+    const count = ns.transcriptCapture?.getUtteranceCount?.() || 0;
     panel.innerHTML = `
       <div class="meetvcon-row">
         <span class="meetvcon-dot ${dotClass}"></span>
-        <span class="meetvcon-title">MeetVcon</span>
+        <span class="meetvcon-title">SipPulse Meet Capture</span>
       </div>
       <div class="meetvcon-row meetvcon-status">${statusText}</div>
-      <div class="meetvcon-row meetvcon-actions">${actionHtml}</div>
+      <div class="meetvcon-row meetvcon-count">${count} caption segment${count === 1 ? "" : "s"}</div>
+      <div class="meetvcon-row meetvcon-consent">Transcript goes to SipPulse CRM and the collaborator's email.</div>
+      <div class="meetvcon-row meetvcon-actions">
+        ${action ? `<button class="meetvcon-btn" data-action="${action[0]}">${action[1]}</button>` : ""}
+      </div>
     `;
 
-    panel.querySelectorAll("[data-action]").forEach((el) => {
-      el.addEventListener("click", () => {
-        const action = el.getAttribute("data-action");
-        const wd = ns.captionsWatchdog;
-        if (!wd) return;
-        if (action === "opt-out") wd.optOut();
-        else if (action === "clear-opt-out") wd.clearOptOut();
-        else if (action === "try-again") wd.forceEnable();
-      });
+    panel.querySelector("[data-action]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      const actionName = button.dataset.action;
+      if (actionName === "disable") await handlers.onDisable?.();
+      else if (actionName === "resume") await handlers.onResume?.();
+      else if (actionName === "setup") handlers.onOpenSetup?.();
     });
+  }
+
+  function init(nextHandlers = {}) {
+    handlers = nextHandlers;
+    if (!countTimer) countTimer = setInterval(() => render(currentStatus), 2_000);
+    unsubscribe?.();
+    unsubscribe = ns.captionsWatchdog.onStatusChange(render);
+    render("idle");
   }
 
   function destroy() {
-    const panel = document.getElementById(PANEL_ID);
-    if (panel) panel.remove();
-  }
-
-  function init() {
-    const wd = ns.captionsWatchdog;
-    if (!wd) {
-      log.error("captionsWatchdog not loaded — panel cannot init");
-      return;
-    }
-    wd.onStatusChange((status) => {
-      log.debug("status →", status);
-      render(status);
-    });
-    render(wd.getStatus() || "idle");
+    if (countTimer) clearInterval(countTimer);
+    countTimer = null;
+    unsubscribe?.();
+    unsubscribe = null;
+    document.getElementById(PANEL_ID)?.remove();
   }
 
   ns.inCallPanel = { init, destroy, render };

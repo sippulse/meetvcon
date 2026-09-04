@@ -1,5 +1,5 @@
 // Transcript capture: observe Meet's caption overlay, build a buffer of
-// utterances, persist to chrome.storage.session every few seconds.
+// utterances, and send encrypted persistence requests to the service worker.
 //
 // Meet captions are progressive: as a person speaks, a single caption
 // "block" element's text is updated word-by-word. When the speaker pauses
@@ -11,7 +11,7 @@
   const ns = (window.MeetVcon = window.MeetVcon || {});
   if (ns.transcriptCapture) return;
 
-  const { log, selectors, vcon, storage } = ns;
+  const { log, selectors, vcon, captions } = ns;
 
   const PERSIST_INTERVAL_MS = 5_000;
 
@@ -31,6 +31,14 @@
     meeting: null, // { uuid, meetingId, meetingUrl, subject, startedAt }
   };
 
+  async function workerRequest(type, payload = {}) {
+    const response = await chrome.runtime.sendMessage({ type, ...payload });
+    if (!response?.ok) {
+      throw new Error(response?.error || `${type} failed`);
+    }
+    return response;
+  }
+
   function meetingIdFromUrl() {
     // Meet URL: https://meet.google.com/abc-defg-hij
     const m = location.pathname.match(/^\/([a-z]{3,4}-[a-z]{4}-[a-z]{3,4})/i);
@@ -48,30 +56,10 @@
   // Within that block, the speaker name is usually a short text node near
   // the top, and the spoken text follows. We grab speaker as the first
   // non-empty short line, text as the remainder.
-  function parseBlock(el) {
-    const raw = (el.innerText || el.textContent || "").trim();
-    if (!raw) return { speaker: null, text: "" };
-    const lines = raw.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-    if (lines.length === 0) return { speaker: null, text: "" };
-    if (lines.length === 1) {
-      // No speaker label visible — treat whole content as text.
-      return { speaker: null, text: lines[0] };
-    }
-    // First line is speaker if it looks like a name (no terminal punctuation,
-    // reasonably short). Otherwise treat all lines as text.
-    const first = lines[0];
-    const looksLikeName =
-      first.length <= 60 && !/[.!?]$/.test(first) && !/\s{2,}/.test(first);
-    if (looksLikeName) {
-      return { speaker: first, text: lines.slice(1).join(" ") };
-    }
-    return { speaker: null, text: lines.join(" ") };
-  }
-
   function recordBlock(el) {
     if (el.tagName === "BUTTON" || el.getAttribute("role") === "button") return;
     let entry = state.blocksByEl.get(el);
-    const parsed = parseBlock(el);
+    const parsed = captions.parseCaptionText(el.innerText || el.textContent);
     const now = new Date();
 
     if (!entry) {
@@ -124,10 +112,17 @@
       captionsEnabled: !!selectors.areCaptionsActive(),
     };
     try {
-      await storage.setMeeting(state.meeting.meetingId, record);
+      await workerRequest("active_meeting_put", { record });
     } catch (err) {
       log.error("failed to persist meeting", err);
     }
+  }
+
+  function resetUtterances() {
+    state.blocksByEl = new WeakMap();
+    state.utteranceIds = [];
+    state.utteranceById = new Map();
+    state.nextId = 1;
   }
 
   function onMutation(mutations) {
@@ -193,8 +188,9 @@
     if (state.meeting && state.meeting.meetingId === meetingId) {
       return state.meeting;
     }
-    // If a record already exists in session storage (e.g. tab reload), reuse it.
-    const existing = await storage.getMeeting(meetingId);
+    resetUtterances();
+    const response = await workerRequest("active_meeting_get", { meetingId });
+    const existing = response.record;
     state.meeting = existing || {
       uuid: vcon.uuidv4(),
       meetingId,
@@ -203,25 +199,26 @@
       startedAt: new Date().toISOString(),
     };
     if (!existing) {
-      await storage.setMeeting(meetingId, { ...state.meeting, utterances: [] });
+      await persist();
     } else {
       // Re-hydrate utterance list from storage so we don't double-count.
       for (const u of existing.utterances || []) {
         const id = state.nextId++;
-        const rec = { ...u, id, startMs: Date.parse(u.start) };
+        const startMs = Date.parse(u.start);
+        const rec = {
+          ...u,
+          id,
+          startMs,
+          lastUpdated:
+            u.lastUpdated ||
+            new Date(startMs + (Number(u.duration) || 0) * 1000).toISOString(),
+        };
         state.utteranceById.set(id, rec);
         state.utteranceIds.push(id);
       }
       log.info("rehydrated", existing.utterances?.length || 0, "utterances");
     }
     log.info("meeting started", state.meeting.meetingId, "uuid", state.meeting.uuid);
-
-    // Notify service worker so it can schedule snapshot alarms.
-    chrome.runtime.sendMessage({
-      type: "call_started",
-      meetingId: state.meeting.meetingId,
-      uuid: state.meeting.uuid,
-    }).catch(() => {});
 
     return state.meeting;
   }
@@ -230,11 +227,20 @@
     if (!state.meeting) return;
     log.info("meeting ended", state.meeting.meetingId);
     await persist();
-    chrome.runtime.sendMessage({
-      type: "call_ended",
+    await workerRequest("call_ended", {
       meetingId: state.meeting.meetingId,
-    }).catch(() => {});
+    });
     state.meeting = null;
+    resetUtterances();
+  }
+
+  async function cancelMeeting() {
+    if (!state.meeting) return;
+    const meetingId = state.meeting.meetingId;
+    state.meeting = null;
+    resetUtterances();
+    await workerRequest("capture_cancelled", { meetingId });
+    log.info("meeting capture discarded", meetingId);
   }
 
   function start() {
@@ -267,6 +273,7 @@
     stop,
     startMeeting,
     endMeeting,
+    cancelMeeting,
     getUtteranceCount: () => state.utteranceIds.length,
     getMeeting: () => state.meeting,
   };

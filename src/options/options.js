@@ -1,150 +1,60 @@
-// Options page logic. Reads/writes config via chrome.storage.local
-// (per CLAUDE.md rule #1: webhook URL, bearer token, and HMAC secret
-// are user-supplied and stored only in chrome.storage.local — never
-// hardcoded in source).
+const { storage } = window.MeetVcon;
 
-const DEFAULT_CONFIG = {
-  webhookUrl: "",
-  bearerToken: "",
-  hmacSecret: "",
-  deliveryMode: "end_of_call",
-  snapshotIntervalMin: 5,
-  includeSpeakerEmail: false,
-  includeCapturerEmail: true,
-};
-
-const els = {
-  form: document.getElementById("form"),
-  webhookUrl: document.getElementById("webhookUrl"),
-  bearerToken: document.getElementById("bearerToken"),
-  hmacSecret: document.getElementById("hmacSecret"),
-  modeEnd: document.getElementById("modeEnd"),
-  modeSnap: document.getElementById("modeSnap"),
-  snapshotIntervalMin: document.getElementById("snapshotIntervalMin"),
-  intervalLabel: document.getElementById("intervalLabel"),
-  includeSpeakerEmail: document.getElementById("includeSpeakerEmail"),
-  includeCapturerEmail: document.getElementById("includeCapturerEmail"),
-  save: document.getElementById("save"),
+const elements = {
+  accept: document.getElementById("accept"),
+  revoke: document.getElementById("revoke"),
   test: document.getElementById("test"),
-  status: document.getElementById("status"),
+  email: document.getElementById("email"),
+  configuration: document.getElementById("configuration"),
+  captureStatus: document.getElementById("captureStatus"),
+  provider: document.getElementById("provider"),
+  message: document.getElementById("message"),
 };
 
-async function load() {
-  const { config } = await chrome.storage.local.get("config");
-  const cfg = { ...DEFAULT_CONFIG, ...(config || {}) };
-  els.webhookUrl.value = cfg.webhookUrl;
-  els.bearerToken.value = cfg.bearerToken;
-  els.hmacSecret.value = cfg.hmacSecret;
-  els.modeEnd.checked = cfg.deliveryMode === "end_of_call";
-  els.modeSnap.checked = cfg.deliveryMode === "periodic_snapshot";
-  els.snapshotIntervalMin.value = cfg.snapshotIntervalMin;
-  els.includeSpeakerEmail.checked = !!cfg.includeSpeakerEmail;
-  els.includeCapturerEmail.checked = !!cfg.includeCapturerEmail;
-  syncIntervalVisibility();
+async function refresh() {
+  const state = await chrome.runtime.sendMessage({ type: "get_popup_state" });
+  if (!state?.ok) throw new Error(state?.error || "Could not load status");
+
+  elements.email.textContent = state.collaboratorEmail || "your company email";
+  elements.configuration.textContent = state.config.configured
+    ? "Managed by SipPulse"
+    : state.config.error || "Not configured";
+  elements.captureStatus.textContent = state.consented
+    ? state.config.captureEnabled
+      ? "Enabled"
+      : "Disabled by administrator"
+    : "Waiting for your consent";
+  elements.provider.textContent =
+    state.config.preferredTranscription === "sippulse_ai"
+      ? "SipPulse AI (Google captions fallback)"
+      : "Google captions";
+  elements.accept.classList.toggle("hidden", state.consented);
+  elements.revoke.classList.toggle("hidden", !state.consented);
+  elements.test.disabled = !state.config.configured;
 }
 
-function syncIntervalVisibility() {
-  const visible = els.modeSnap.checked;
-  els.intervalLabel.classList.toggle("hidden", !visible);
-}
+elements.accept.addEventListener("click", async () => {
+  await storage.setConsent(true);
+  elements.message.textContent = "Capture enabled.";
+  await refresh();
+});
 
-function readForm() {
-  const mode = els.modeSnap.checked ? "periodic_snapshot" : "end_of_call";
-  let interval = parseInt(els.snapshotIntervalMin.value, 10);
-  if (!Number.isFinite(interval)) interval = 5;
-  interval = Math.max(1, Math.min(60, interval));
-  return {
-    webhookUrl: els.webhookUrl.value.trim(),
-    bearerToken: els.bearerToken.value,
-    hmacSecret: els.hmacSecret.value,
-    deliveryMode: mode,
-    snapshotIntervalMin: interval,
-    includeSpeakerEmail: els.includeSpeakerEmail.checked,
-    includeCapturerEmail: els.includeCapturerEmail.checked,
-  };
-}
+elements.revoke.addEventListener("click", async () => {
+  await storage.setConsent(false);
+  elements.message.textContent = "Future meeting capture disabled.";
+  await refresh();
+});
 
-function setStatus(msg, kind) {
-  els.status.textContent = msg;
-  els.status.className = kind || "";
-}
+elements.test.addEventListener("click", async () => {
+  elements.test.disabled = true;
+  elements.message.textContent = "Testing…";
+  const result = await chrome.runtime.sendMessage({ type: "test_connection" });
+  elements.message.textContent = result?.ok
+    ? `Connected (HTTP ${result.status}).`
+    : `Connection failed: ${result?.error || "unknown error"}`;
+  elements.test.disabled = false;
+});
 
-// Build the host pattern for chrome.permissions from a URL.
-// e.g. https://webhook.site/abc → https://webhook.site/*
-function originPatternFor(url) {
-  try {
-    const u = new URL(url);
-    return `${u.protocol}//${u.hostname}/*`;
-  } catch {
-    return null;
-  }
-}
-
-// Returns true if permission is already granted or was granted just now.
-// Must be called inside a user-gesture handler (click) for request() to succeed.
-async function ensurePermission(url) {
-  const pattern = originPatternFor(url);
-  if (!pattern) return false;
-  const has = await chrome.permissions.contains({ origins: [pattern] });
-  if (has) return true;
-  return await chrome.permissions.request({ origins: [pattern] });
-}
-
-async function save(e) {
-  e.preventDefault();
-  const cfg = readForm();
-  if (cfg.webhookUrl && !/^https:\/\//i.test(cfg.webhookUrl)) {
-    setStatus("Webhook URL must start with https://", "error");
-    return;
-  }
-  if (cfg.webhookUrl) {
-    const granted = await ensurePermission(cfg.webhookUrl);
-    if (!granted) {
-      await chrome.storage.local.set({ config: cfg });
-      setStatus(
-        "Saved, but permission was denied. Click Save again to retry. Delivery will fail until you grant access.",
-        "error"
-      );
-      return;
-    }
-  }
-  await chrome.storage.local.set({ config: cfg });
-  setStatus("Saved.", "ok");
-}
-
-async function sendTest() {
-  setStatus("Sending test payload…");
-  // Save current form first so the SW reads up-to-date config.
-  const cfg = readForm();
-  if (!cfg.webhookUrl) {
-    setStatus("Enter a webhook URL first.", "error");
-    return;
-  }
-  if (!/^https:\/\//i.test(cfg.webhookUrl)) {
-    setStatus("Webhook URL must start with https://", "error");
-    return;
-  }
-  const granted = await ensurePermission(cfg.webhookUrl);
-  if (!granted) {
-    setStatus("Permission denied for that webhook host.", "error");
-    return;
-  }
-  await chrome.storage.local.set({ config: cfg });
-  try {
-    const result = await chrome.runtime.sendMessage({ type: "test_webhook" });
-    if (result?.ok) {
-      setStatus(`Test payload delivered (HTTP ${result.status}).`, "ok");
-    } else {
-      setStatus(`Test failed: ${result?.error || "unknown error"}`, "error");
-    }
-  } catch (err) {
-    setStatus(`Test failed: ${err.message}`, "error");
-  }
-}
-
-els.form.addEventListener("submit", save);
-els.test.addEventListener("click", sendTest);
-els.modeEnd.addEventListener("change", syncIntervalVisibility);
-els.modeSnap.addEventListener("change", syncIntervalVisibility);
-
-load();
+refresh().catch((error) => {
+  elements.message.textContent = error.message;
+});
