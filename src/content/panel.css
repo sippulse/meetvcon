@@ -67,6 +67,12 @@
   background: #9aa0a6;
 }
 
+.meetvcon-dot--red {
+  background: #ea4335;
+  box-shadow: 0 0 6px rgba(234, 67, 53, 0.6);
+  animation: meetvcon-pulse 1.2s ease-in-out infinite;
+}
+
 @keyframes meetvcon-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

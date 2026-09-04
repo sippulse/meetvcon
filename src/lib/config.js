@@ -10,7 +10,22 @@
     bearerToken: "",
     captureEnabled: true,
     preferredTranscription: "sippulse_ai",
+    allowedEmailDomains: ["sippulse.com"],
   });
+
+  function normalizeDomains(value) {
+    const domains = (Array.isArray(value) ? value : [])
+      .filter((domain) => typeof domain === "string")
+      .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
+      .filter(Boolean);
+    return domains.length ? domains : DEFAULTS.allowedEmailDomains;
+  }
+
+  function isAllowedEmail(email, config = DEFAULTS) {
+    if (typeof email !== "string" || !email.includes("@")) return false;
+    const domain = email.slice(email.lastIndexOf("@") + 1).toLowerCase();
+    return (config.allowedEmailDomains || DEFAULTS.allowedEmailDomains).includes(domain);
+  }
 
   function normalize(raw = {}) {
     const hasManagedEndpoint =
@@ -42,6 +57,7 @@
         raw.PreferredTranscription === "google_captions"
           ? "google_captions"
           : "sippulse_ai",
+      allowedEmailDomains: normalizeDomains(raw.AllowedEmailDomains),
       configured: hasManagedEndpoint && !!raw.BearerToken,
       error:
         hasManagedEndpoint && raw.BearerToken
@@ -60,5 +76,5 @@
     return normalize(managed);
   }
 
-  ns.config = { API_ORIGIN, DEFAULTS, normalize, get };
+  ns.config = { API_ORIGIN, DEFAULTS, normalize, get, isAllowedEmail };
 })(typeof self !== "undefined" ? self : window);

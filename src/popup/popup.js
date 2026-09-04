@@ -9,9 +9,14 @@ const elements = {
   email: document.getElementById("email"),
   outbox: document.getElementById("outbox"),
   queue: document.getElementById("queue"),
+  lastTranscript: document.getElementById("lastTranscript"),
+  lastTranscriptLabel: document.getElementById("lastTranscriptLabel"),
+  downloadMd: document.getElementById("downloadMd"),
+  downloadVcon: document.getElementById("downloadVcon"),
   settings: document.getElementById("settings"),
 };
 
+const MICROPHONE_PAGE = "src/permissions/microphone.html";
 let state = null;
 let activeTab = null;
 
@@ -32,13 +37,34 @@ function statusCopy(status) {
         ? "Audio will be transcribed after the call."
         : "Start SipPulse AI for better accuracy.",
     ],
+    uploading: ["Uploading audio to SipPulse", "Keep Chrome open until the upload finishes."],
     processing: ["SipPulse AI is processing", "CRM storage and email are in progress."],
     delivered: ["Delivered", "Saved to CRM and sent for email delivery."],
     queued: ["Delivery queued", status.error || "SipPulse will retry automatically."],
     needs_attention: ["Delivery needs attention", status.error || "Retry from the outbox below."],
-    disabled_for_call: ["Disabled for this call", "No transcript from this call will be delivered."],
+    disabled_for_call: ["Discarded", "Nothing from that call was delivered."],
   };
   return states[status.state] || ["Ready", "Open a Google Meet to begin."];
+}
+
+function downloadText(filename, text, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+function downloadDocument(document_, format) {
+  const base = `sippulse-meet-${document_.uuid || "transcript"}`;
+  if (format === "md") {
+    downloadText(`${base}.md`, self.MeetVcon.vcon.toMarkdown(document_), "text/markdown");
+  } else {
+    downloadText(`${base}.vcon.json`, JSON.stringify(document_, null, 2), "application/vcon+json");
+  }
 }
 
 function renderQueue(queue) {
@@ -48,17 +74,34 @@ function renderQueue(queue) {
     const row = document.createElement("div");
     row.className = "queue-row";
     const label = document.createElement("span");
-    label.textContent = `${item.deliveryKind} · ${item.lastError || "pending"}`;
+    const when = item.state === "queued" && item.nextAttemptAt
+      ? `retry ${new Date(item.nextAttemptAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : "needs attention";
+    label.textContent = `${item.subject || item.deliveryKind} · ${item.lastError || "pending"} · ${when}`;
     const retry = document.createElement("button");
     retry.textContent = "Retry";
     retry.addEventListener("click", () => queueAction("retry_queue_item", item.id));
+    const download = document.createElement("button");
+    download.textContent = "Download";
+    download.addEventListener("click", async () => {
+      const result = await chrome.runtime.sendMessage({ type: "get_queue_item_document", id: item.id });
+      if (result?.ok) downloadDocument(result.document, "md");
+      else elements.message.textContent = result?.error || "Download failed";
+    });
     const discard = document.createElement("button");
     discard.textContent = "Discard";
     discard.className = "danger";
     discard.addEventListener("click", () => queueAction("discard_queue_item", item.id));
-    row.append(label, retry, discard);
+    row.append(label, retry, download, discard);
     elements.queue.append(row);
   }
+}
+
+function renderLastTranscript(meta) {
+  elements.lastTranscript.classList.toggle("hidden", !meta);
+  if (!meta) return;
+  const when = new Date(meta.savedAt).toLocaleString();
+  elements.lastTranscriptLabel.textContent = `${meta.subject || "Meeting"} · ${when} · Google captions copy`;
 }
 
 async function refresh() {
@@ -74,16 +117,13 @@ async function refresh() {
 
   const inMeet = activeTab?.url?.startsWith("https://meet.google.com/");
   const activeMeetingId = meetingIdFromUrl(activeTab?.url);
-  const meetingId = state.activeMeetingIds.includes(activeMeetingId)
-    ? activeMeetingId
-    : null;
+  const meetingId = state.activeMeetingIds.includes(activeMeetingId) ? activeMeetingId : null;
   const aiActive = meetingId && state.aiMeetingIds.includes(meetingId);
-  const validEmail = state.collaboratorEmail
-    ?.toLowerCase()
-    .endsWith("@sippulse.com");
+  const validEmail = !!state.collaboratorAuthorized;
   const canStartAi =
     state.consented &&
     validEmail &&
+    state.config.configured &&
     state.config.captureEnabled &&
     state.config.preferredTranscription === "sippulse_ai" &&
     inMeet &&
@@ -94,9 +134,20 @@ async function refresh() {
   elements.startAi.classList.toggle("hidden", !canStartAi);
   elements.aiHint.classList.toggle("hidden", !canStartAi);
   renderQueue(state.queue);
-  if (canStartAi) {
-    chrome.runtime.sendMessage({ type: "prepare_ai_capture" }).catch(() => {});
+  renderLastTranscript(state.lastTranscript);
+}
+
+async function microphonePermission() {
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" });
+    return status.state;
+  } catch {
+    return "prompt";
   }
+}
+
+async function openMicrophonePage() {
+  await chrome.tabs.create({ url: chrome.runtime.getURL(MICROPHONE_PAGE) });
 }
 
 async function startAiCapture() {
@@ -104,27 +155,35 @@ async function startAiCapture() {
   const meetingId = state?.activeMeetingIds?.includes(candidate) ? candidate : null;
   if (!meetingId || !activeTab?.id) return;
   elements.startAi.disabled = true;
-  elements.message.textContent = "Requesting audio access…";
 
   try {
-    // This must be the first awaited operation in the click handler so Chrome
-    // can associate tabCapture with the user's action.
-    const streamId = await chrome.tabCapture.getMediaStreamId({
-      targetTabId: activeTab.id,
-    });
-    await chrome.runtime.sendMessage({ type: "prepare_ai_capture" });
+    if ((await microphonePermission()) !== "granted") {
+      elements.message.textContent =
+        "Allow microphone access in the new tab, then return to Meet and start again.";
+      await openMicrophonePage();
+      return;
+    }
+    elements.message.textContent = "Requesting audio access…";
+    // The worker obtains the tab stream ID itself: IDs issued to the popup
+    // cannot be redeemed by the offscreen recorder.
     const result = await chrome.runtime.sendMessage({
-      target: "offscreen",
-      type: "ai_capture_start",
-      streamId,
+      type: "start_ai_capture",
       meetingId,
+      tabId: activeTab.id,
     });
-    if (!result?.ok) throw new Error(result?.error || "Audio capture failed");
-    await chrome.runtime.sendMessage({ type: "ai_capture_started", meetingId });
+    if (!result?.ok) {
+      if (result?.code === "microphone_permission") {
+        elements.message.textContent = "Microphone access is required. Allow it in the new tab.";
+        await openMicrophonePage();
+        return;
+      }
+      throw new Error(result?.error || "Audio capture failed");
+    }
     elements.message.textContent = "SipPulse AI capture started.";
     await refresh();
   } catch (error) {
     elements.message.textContent = error.message || String(error);
+  } finally {
     elements.startAi.disabled = false;
   }
 }
@@ -136,9 +195,20 @@ async function queueAction(type, id) {
   await refresh();
 }
 
+async function downloadLast(format) {
+  const result = await chrome.runtime.sendMessage({ type: "get_last_transcript" });
+  if (!result?.ok || !result.document) {
+    elements.message.textContent = result?.error || "No transcript stored locally";
+    return;
+  }
+  downloadDocument(result.document, format);
+}
+
 elements.startAi.addEventListener("click", startAiCapture);
 elements.setup.addEventListener("click", () => chrome.runtime.openOptionsPage());
 elements.settings.addEventListener("click", () => chrome.runtime.openOptionsPage());
+elements.downloadMd.addEventListener("click", () => downloadLast("md"));
+elements.downloadVcon.addEventListener("click", () => downloadLast("vcon"));
 
 refresh().catch((error) => {
   elements.status.textContent = "Status unavailable";

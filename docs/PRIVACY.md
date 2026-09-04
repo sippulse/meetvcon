@@ -24,8 +24,9 @@ or sent to arbitrary user-configured destinations.
 ## Storage and deletion
 
 Audio remains in browser memory until upload and is not written to browser
-storage. Active caption transcripts and failed-delivery payloads are encrypted
-locally; status metadata contains no transcript text. Local payloads are removed
+storage. Active caption transcripts, failed-delivery payloads, and a copy of the last
+captured transcript are encrypted locally against casual access; status
+metadata contains no transcript text. Local payloads are removed
 after successful delivery or when the collaborator discards them. The ingestion
 service deletes raw audio after transcription completes or permanently fails.
 CRM and email copies follow SipPulse corporate retention and deletion policies.

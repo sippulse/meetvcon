@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SipPulse Meet Capture — microphone access</title>
+    <link rel="stylesheet" href="../options/options.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">SIPPULSE INTERNAL</p>
+      <h1>Microphone access</h1>
+      <p class="intro">
+        SipPulse AI capture records the Meet tab and your microphone. Chrome
+        asks for microphone permission once, on this page. The recorder itself
+        runs in the background and cannot show the prompt.
+      </p>
+      <section class="card">
+        <div class="actions">
+          <button id="allow" type="button">Allow microphone</button>
+          <span id="message" aria-live="polite">Waiting for permission…</span>
+        </div>
+        <p class="footnote">
+          Nothing is recorded on this page. Return to your Meet tab and click
+          <strong>Start SipPulse AI capture</strong> once access is granted.
+        </p>
+      </section>
+    </main>
+    <script src="microphone.js"></script>
+  </body>
+</html>

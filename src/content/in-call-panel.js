@@ -7,25 +7,33 @@
   const PANEL_ID = "meetvcon-panel";
   let handlers = {};
   let currentStatus = "idle";
+  let locked = false;
+  let audioActive = false;
   let countTimer = null;
   let unsubscribe = null;
 
   const STATES = {
     active: ["meetvcon-dot--green", "Capturing Google captions"],
     enabling: ["meetvcon-dot--amber", "Enabling Google captions…"],
-    opted_out: ["meetvcon-dot--grey", "Capture stopped for this call"],
+    discarded: ["meetvcon-dot--grey", "Stopped. Nothing from this call will be delivered"],
     setup_required: ["meetvcon-dot--amber", "Consent is required before capture"],
-    identity_required: ["meetvcon-dot--amber", "Sign in to Chrome with your SipPulse account"],
+    identity_required: ["meetvcon-dot--amber", "Sign in to Chrome with your company account"],
     managed_disabled: ["meetvcon-dot--grey", "Capture is disabled by SipPulse"],
     capture_error: ["meetvcon-dot--grey", "Capture could not start"],
     idle: ["meetvcon-dot--grey", "Waiting for the meeting"],
   };
 
+  function statusLine(status) {
+    if (audioActive && (status === "active" || status === "enabling")) {
+      return ["meetvcon-dot--red", "Recording tab audio and microphone for SipPulse AI"];
+    }
+    return STATES[status] || STATES.capture_error;
+  }
+
   function actionFor(status) {
     if (status === "active" || status === "enabling") {
-      return ["disable", "Stop and discard this call"];
+      return ["discard", "Stop and discard this call"];
     }
-    if (status === "opted_out") return ["resume", "Resume capture"];
     if (status === "setup_required" || status === "identity_required") {
       return ["setup", "Review setup"];
     }
@@ -43,9 +51,12 @@
       document.body.appendChild(panel);
     }
 
-    const [dotClass, statusText] = STATES[status] || STATES.capture_error;
+    const [dotClass, statusText] = statusLine(status);
     const action = actionFor(status);
     const count = ns.transcriptCapture?.getUtteranceCount?.() || 0;
+    const consent = audioActive
+      ? "Audio and transcript go to SipPulse CRM and the collaborator's email."
+      : "Transcript goes to SipPulse CRM and the collaborator's email.";
     panel.innerHTML = `
       <div class="meetvcon-row">
         <span class="meetvcon-dot ${dotClass}"></span>
@@ -53,7 +64,7 @@
       </div>
       <div class="meetvcon-row meetvcon-status">${statusText}</div>
       <div class="meetvcon-row meetvcon-count">${count} caption segment${count === 1 ? "" : "s"}</div>
-      <div class="meetvcon-row meetvcon-consent">Transcript goes to SipPulse CRM and the collaborator's email.</div>
+      <div class="meetvcon-row meetvcon-consent">${consent}</div>
       <div class="meetvcon-row meetvcon-actions">
         ${action ? `<button class="meetvcon-btn" data-action="${action[0]}">${action[1]}</button>` : ""}
       </div>
@@ -63,17 +74,36 @@
       const button = event.currentTarget;
       button.disabled = true;
       const actionName = button.dataset.action;
-      if (actionName === "disable") await handlers.onDisable?.();
-      else if (actionName === "resume") await handlers.onResume?.();
+      if (actionName === "discard") await handlers.onDiscard?.();
       else if (actionName === "setup") handlers.onOpenSetup?.();
     });
   }
 
+  // Terminal states (discarded, prerequisites) must not be overwritten by
+  // later captions-watchdog status changes.
+  function lock(status) {
+    locked = true;
+    render(status);
+  }
+
+  function onWatchdogStatus(status) {
+    if (locked) return;
+    render(status);
+  }
+
+  function setAudioActive(active) {
+    if (audioActive === !!active) return;
+    audioActive = !!active;
+    if (document.getElementById(PANEL_ID)) render(currentStatus);
+  }
+
   function init(nextHandlers = {}) {
     handlers = nextHandlers;
+    locked = false;
+    audioActive = false;
     if (!countTimer) countTimer = setInterval(() => render(currentStatus), 2_000);
     unsubscribe?.();
-    unsubscribe = ns.captionsWatchdog.onStatusChange(render);
+    unsubscribe = ns.captionsWatchdog.onStatusChange(onWatchdogStatus);
     render("idle");
   }
 
@@ -82,8 +112,10 @@
     countTimer = null;
     unsubscribe?.();
     unsubscribe = null;
+    locked = false;
+    audioActive = false;
     document.getElementById(PANEL_ID)?.remove();
   }
 
-  ns.inCallPanel = { init, destroy, render };
+  ns.inCallPanel = { init, destroy, render, lock, setAudioActive };
 })();

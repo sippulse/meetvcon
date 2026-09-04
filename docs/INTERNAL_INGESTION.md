@@ -12,7 +12,11 @@ Never expose the SipPulse.ai API key to the extension.
 - `X-SipPulse-Transcription-Source: google_captions|google_captions_fallback`
 
 `final` and `recovered` requests atomically upsert the vCon and enqueue one
-transcript email to `attachments[].body.captured_by_user.email`. Google-caption
+transcript email to `attachments[].body.captured_by_user.email`. `test`
+requests carry `google_captions` as the source and must not be stored or
+emailed. Until SSO is in place, `captured_by_user.email` is asserted by the
+client; do not use it for authorization, and restrict email delivery to
+allowed company domains server-side. Google-caption
 recovery records remain encrypted in the browser until one of these requests.
 
 ## SipPulse.ai requests
@@ -36,6 +40,9 @@ the final vCon in CRM, and enqueue the diarized transcript email.
 ## Reliability and responses
 
 Use `vcon_uuid` as the idempotency key, with `test` requests handled separately.
+The extension may deliver the same UUID twice (audio first, captions later) when
+an upload result is lost; a later `google_captions_fallback` request must not
+replace a completed SipPulse AI transcript or trigger a second email.
 A successful audio
 upload returns HTTP 202 with `{ "request_id": "..." }`; a vCon upload returns
 HTTP 200/202. Processing failures must use a non-2xx status. Delete raw audio

@@ -41,10 +41,21 @@
       </section>
 
       <section id="outbox" class="outbox hidden">
-        <h2>Needs attention</h2>
+        <h2>Outbox</h2>
         <div id="queue"></div>
       </section>
+
+      <section id="lastTranscript" class="outbox hidden">
+        <h2>Last transcript (local copy)</h2>
+        <div class="queue-row">
+          <span id="lastTranscriptLabel"></span>
+          <button id="downloadMd">.md</button>
+          <button id="downloadVcon">.vcon</button>
+        </div>
+      </section>
     </main>
+    <script src="../lib/logger.js"></script>
+    <script src="../lib/vcon.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

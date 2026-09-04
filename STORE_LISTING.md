@@ -23,6 +23,8 @@ SipPulse collaborator.
 - `activeTab` / `tabCapture`: after an explicit action, record the active Meet
   tab for SipPulse AI transcription. Audio capture cannot start automatically.
 - `offscreen`: keep the user-approved audio recorder alive after the popup closes.
+- Microphone access is requested once through an extension page; the offscreen
+  recorder reuses that grant.
 - `https://meet.google.com/*`: detect calls, capture caption fallback, and show
   the in-call disclosure/control panel.
 - `https://api.sippulse.com/*`: upload audio or vCon only to SipPulse ingestion.

@@ -20,7 +20,18 @@
       "title": "Preferred transcription source",
       "description": "SipPulse AI requires one user click per meeting; Google captions remain the fallback.",
       "type": "string",
-      "enum": ["sippulse_ai", "google_captions"]
+      "enum": [
+        "sippulse_ai",
+        "google_captions"
+      ]
+    },
+    "AllowedEmailDomains": {
+      "title": "Allowed collaborator email domains",
+      "description": "Chrome profile email domains allowed to capture. Defaults to sippulse.com.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

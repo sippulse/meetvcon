@@ -223,15 +223,27 @@
     return state.meeting;
   }
 
+  // Always releases local state, even when the worker reports a failure:
+  // a queued delivery is handled by the worker's outbox, and an empty call
+  // must not leave timers re-creating the record every five seconds.
   async function endMeeting() {
-    if (!state.meeting) return;
-    log.info("meeting ended", state.meeting.meetingId);
-    await persist();
-    await workerRequest("call_ended", {
-      meetingId: state.meeting.meetingId,
-    });
-    state.meeting = null;
-    resetUtterances();
+    if (!state.meeting) return null;
+    const meetingId = state.meeting.meetingId;
+    log.info("meeting ended", meetingId);
+    let response = null;
+    try {
+      await persist();
+      response = await chrome.runtime.sendMessage({ type: "call_ended", meetingId });
+      if (!response?.ok && !response?.queued) {
+        log.warn("final delivery not accepted", response?.error);
+      }
+    } catch (err) {
+      log.error("call_ended failed", err);
+    } finally {
+      state.meeting = null;
+      resetUtterances();
+    }
+    return response;
   }
 
   async function cancelMeeting() {
@@ -276,5 +288,6 @@
     cancelMeeting,
     getUtteranceCount: () => state.utteranceIds.length,
     getMeeting: () => state.meeting,
+    meetingIdFromUrl,
   };
 })();

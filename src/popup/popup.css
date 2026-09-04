@@ -80,6 +80,7 @@ h2 {
 }
 
 .dot--processing,
+.dot--uploading,
 .dot--queued {
   background: #e39416;
 }

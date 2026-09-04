@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a build-free Chrome Manifest V3 extension for internal SipPulse use. `manifest.json` is the runtime entry point. Shared browser utilities live in `src/lib/`; Google Meet detection, caption fallback, and the in-call panel are in `src/content/`. The service worker owns encrypted recovery, delivery, and retries in `src/background/`, while `src/offscreen/` records tab and microphone audio. User interfaces live in `src/options/` and `src/popup/`. Tests mirror library concerns under `tests/`; store assets and their generator are in `screenshots/` and `tools/`.
+This is a build-free Chrome Manifest V3 extension for internal SipPulse use. `manifest.json` is the runtime entry point. Shared browser utilities live in `src/lib/`; Google Meet detection, caption fallback, and the in-call panel are in `src/content/`. The service worker owns encrypted recovery, delivery, and retries in `src/background/`: put behavior in `worker-core.mjs` (dependency-injected, unit tested) and keep `service-worker.js` as wiring only. `src/offscreen/` records tab and microphone audio and reports upload results back as `ai_upload_result`; `src/permissions/` holds the one-time microphone grant page. User interfaces live in `src/options/` and `src/popup/`. Tests mirror library concerns under `tests/`; store assets and their generator are in `screenshots/` and `tools/`.
 
 Read `PRD.md` before changing product behavior. Read `docs/INTERNAL_INGESTION.md` when changing the upload, CRM vCon, email, or SipPulse AI contract.
 
@@ -23,7 +23,7 @@ Use plain JavaScript with two-space indentation, semicolons, double-quoted strin
 
 ## Testing Guidelines
 
-Name tests after their module, such as `tests/vcon.test.js`. Add focused tests for parsing, configuration, vCon shaping, and retry-state changes. Before opening a PR, run `npm test`, `npm run check`, and a Chromium smoke test. Changes to capture or delivery also require a real Meet test against staging.
+Name tests after their module, such as `tests/vcon.test.js`. Add focused tests for parsing, configuration, vCon shaping, and retry-state changes. Delivery, discard, recovery, and AI-session changes belong in `tests/worker-core.test.js` using `tests/fake-chrome.js`; do not add service-worker behavior without a test there. Before opening a PR, run `npm test`, `npm run check`, and a Chromium smoke test. Changes to capture or delivery also require a real Meet test against staging.
 
 ## Commit & Pull Request Guidelines
 

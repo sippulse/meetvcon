@@ -18,7 +18,8 @@ Linux policy example (`/etc/opt/chrome/policies/managed/sippulse-meet.json`):
         "EndpointUrl": "https://api.sippulse.com/v1/meet-captures",
         "BearerToken": "ROTATABLE_PILOT_TOKEN",
         "CaptureEnabled": true,
-        "PreferredTranscription": "sippulse_ai"
+        "PreferredTranscription": "sippulse_ai",
+        "AllowedEmailDomains": ["sippulse.com"]
       }
     }
   }
@@ -27,6 +28,17 @@ Linux policy example (`/etc/opt/chrome/policies/managed/sippulse-meet.json`):
 
 The bearer policy is a pilot mechanism. Replace it with SipPulse SSO before
 broad deployment; do not put the SipPulse.ai API key in browser policy.
+`AllowedEmailDomains` is optional and defaults to `sippulse.com`.
+
+### Microphone permission
+
+The background recorder cannot show Chrome's microphone prompt. The first time
+a collaborator starts SipPulse AI capture, the popup opens
+`src/permissions/microphone.html` in a tab to request the grant once; after
+that the recorder reuses it. Administrators can pre-grant it and skip the tab
+with the Chrome policy `AudioCaptureAllowedUrls` containing
+`chrome-extension://EXTENSION_ID/` (verify this against your Chrome version in
+the pilot before relying on it).
 
 ## Company deployment
 
@@ -40,8 +52,17 @@ discard behavior have passed the pilot checklist.
 
 1. Confirm capture stays off before consent and for a non-SipPulse Chrome profile.
 2. Join Meet and verify the visible panel and Google-caption count.
-3. Click the extension, start SipPulse AI, and grant microphone access.
+3. Click the extension and start SipPulse AI. On first use a tab asks for
+   microphone access; allow it, return to Meet, and start again.
 4. Confirm remote audio remains audible during recording.
-5. End the call; verify CRM stores the diarized vCon and the collaborator receives one email.
-6. Repeat with a failed endpoint, then restore it and retry from the outbox.
-7. Start another call, choose **Stop and discard**, and verify nothing is delivered.
+5. Confirm the in-call panel switches to "Recording tab audio and microphone".
+6. End the call; the popup shows "Uploading audio", then "SipPulse AI is
+   processing". Verify CRM stores the diarized vCon and the collaborator
+   receives one email.
+7. Repeat with a failed endpoint, then restore it and retry from the outbox.
+   Confirm **Download** on the outbox row and "Last transcript" in the popup
+   produce a readable `.md`.
+8. Start another call, choose **Stop and discard**, reload the Meet tab, and
+   verify the panel stays in the discarded state and nothing is delivered.
+9. Join a call where nobody speaks and leave; confirm the popup does not stay
+   on "Google captions active".

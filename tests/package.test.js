@@ -15,6 +15,8 @@ test("manifest references existing packaged files", () => {
     ...Object.values(manifest.icons),
     ...manifest.content_scripts.flatMap((entry) => [...entry.js, ...entry.css]),
     "src/offscreen/offscreen.html",
+    "src/permissions/microphone.html",
+    "src/background/worker-core.mjs",
   ];
   for (const reference of references) {
     assert.equal(fs.existsSync(path.join(root, reference)), true, reference);
@@ -34,6 +36,7 @@ test("extension pages reference existing local assets", () => {
     "src/options/options.html",
     "src/popup/popup.html",
     "src/offscreen/offscreen.html",
+    "src/permissions/microphone.html",
   ]) {
     const html = fs.readFileSync(path.join(root, htmlPath), "utf8");
     const directory = path.dirname(path.join(root, htmlPath));

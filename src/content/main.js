@@ -13,23 +13,26 @@
   let inCall = false;
   let captureRunning = false;
   let transitionRunning = false;
+  let currentMeetingId = null;
 
-  async function capturePrerequisite() {
+  async function capturePrerequisite(meetingId) {
     const state = await chrome.runtime.sendMessage({ type: "get_popup_state" });
-    if (!state?.consented) return "setup_required";
-    if (!state.collaboratorEmail?.toLowerCase().endsWith("@sippulse.com")) {
-      return "identity_required";
-    }
+    if (!state?.consented) return { status: "setup_required", state };
+    if (!state.collaboratorAuthorized) return { status: "identity_required", state };
     if (!state.config.configured || !state.config.captureEnabled) {
-      return "managed_disabled";
+      return { status: "managed_disabled", state };
     }
-    return "ready";
+    if (meetingId && state.discardedMeetingIds?.includes(meetingId)) {
+      return { status: "discarded", state };
+    }
+    return { status: "ready", state };
   }
 
   async function startCapture() {
-    const prerequisite = await capturePrerequisite();
-    if (prerequisite !== "ready") {
-      inCallPanel.render(prerequisite);
+    currentMeetingId = transcriptCapture.meetingIdFromUrl();
+    const { status, state } = await capturePrerequisite(currentMeetingId);
+    if (status !== "ready") {
+      inCallPanel.lock(status);
       return;
     }
 
@@ -38,40 +41,50 @@
     transcriptCapture.start();
     const meeting = await transcriptCapture.startMeeting();
     captureRunning = !!meeting;
-    if (!meeting) inCallPanel.render("capture_error");
+    if (!meeting) {
+      inCallPanel.lock("capture_error");
+      return;
+    }
+    inCallPanel.setAudioActive(state.aiMeetingIds?.includes(meeting.meetingId) || false);
   }
 
-  async function disableForCall() {
+  // "Stop and discard" is final for this call: the worker remembers the
+  // meeting code so a reload or a second tab cannot resume capture.
+  async function discardForCall() {
     if (!captureRunning) return;
+    captureRunning = false;
     captionsWatchdog.optOut();
     captionsWatchdog.stop();
     transcriptCapture.stop();
+    inCallPanel.setAudioActive(false);
+    inCallPanel.lock("discarded");
     await transcriptCapture.cancelMeeting();
-    captureRunning = false;
-    inCallPanel.render("opted_out");
-  }
-
-  async function resumeForCall() {
-    await startCapture();
   }
 
   async function enterCall() {
     inCallPanel.init({
-      onDisable: disableForCall,
-      onResume: resumeForCall,
+      onDiscard: discardForCall,
       onOpenSetup: () => chrome.runtime.openOptionsPage(),
     });
     await startCapture();
   }
 
   async function leaveCall() {
-    if (captureRunning) {
-      await transcriptCapture.endMeeting();
+    const meetingId = currentMeetingId;
+    try {
+      // Stop the persist timer before finalizing so a late snapshot cannot
+      // re-create the record the worker is about to remove.
+      captionsWatchdog.stop();
+      transcriptCapture.stop();
+      if (captureRunning) await transcriptCapture.endMeeting();
+    } finally {
       captureRunning = false;
+      currentMeetingId = null;
+      inCallPanel.destroy();
+      if (meetingId) {
+        chrome.runtime.sendMessage({ type: "call_left", meetingId }).catch(() => {});
+      }
     }
-    captionsWatchdog.stop();
-    transcriptCapture.stop();
-    inCallPanel.destroy();
   }
 
   async function checkCallTransition() {
@@ -85,11 +98,17 @@
       else await leaveCall();
     } catch (error) {
       log.error("call transition failed", error);
-      inCallPanel.render("capture_error");
+      if (inCall) inCallPanel.lock("capture_error");
     } finally {
       transitionRunning = false;
     }
   }
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === "ai_capture_state" && message.meetingId === currentMeetingId) {
+      inCallPanel.setAudioActive(!!message.active);
+    }
+  });
 
   const lifecycleTimer = setInterval(checkCallTransition, 2_000);
   checkCallTransition();
@@ -98,10 +117,7 @@
     clearInterval(lifecycleTimer);
     if (captureRunning) {
       chrome.runtime
-        .sendMessage({
-          type: "call_ended",
-          meetingId: transcriptCapture.getMeeting()?.meetingId,
-        })
+        .sendMessage({ type: "call_ended", meetingId: transcriptCapture.getMeeting()?.meetingId })
         .catch(() => {});
     }
   });
