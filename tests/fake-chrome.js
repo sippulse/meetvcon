@@ -69,6 +69,12 @@ function createFakeChrome(options = {}) {
         return `stream-for-tab-${targetTabId}`;
       },
     },
+    permissions: {
+      // Every origin is granted unless the test lists the missing ones.
+      async contains({ origins }) {
+        return !origins.some((origin) => (state.missingOrigins || []).includes(origin));
+      },
+    },
     identity: {
       async getProfileUserInfo() {
         return state.email ? { email: state.email, id: "profile-1" } : {};

@@ -134,7 +134,9 @@ async function refresh() {
     meetingId &&
     !aiActive;
 
-  elements.setup.classList.toggle("hidden", state.consented && validEmail);
+  const needsAccess = (state.missingOrigins || []).length > 0;
+  elements.setup.textContent = needsAccess ? "Allow access to configured servers" : "Review and enable capture";
+  elements.setup.classList.toggle("hidden", state.consented && validEmail && !needsAccess);
   elements.startAi.classList.toggle("hidden", !canStartAi);
   elements.aiHint.classList.toggle("hidden", !canStartAi);
   renderQueue(state.queue);

@@ -2,13 +2,13 @@
   "type": "object",
   "properties": {
     "EndpointUrl": {
-      "title": "SipPulse vCon storage endpoint",
-      "description": "HTTPS URL on api.sippulse.com that stores the final vCon in CRM and emails the transcript.",
+      "title": "vCon store endpoint",
+      "description": "Required. HTTPS URL that receives the final vCon (for SipPulse: the CRM's /api/vcons/ingest).",
       "type": "string"
     },
-    "BearerToken": {
-      "title": "Temporary vCon storage bearer token",
-      "description": "Optional pilot credential. Prefer SipPulse SSO for production.",
+    "HmacSecret": {
+      "title": "vCon store HMAC secret",
+      "description": "The CRM's VCON_HMAC_SECRET. Every delivery is signed with X-MeetVcon-Signature: sha256=<HMAC-SHA256 of the body>.",
       "type": "string"
     },
     "AllowedEmailDomains": {
@@ -19,9 +19,38 @@
         "type": "string"
       }
     },
+    "TranscriptionProvider": {
+      "title": "Live transcription provider",
+      "description": "deepgram (nova-3, multilingual, diarized) or sippulse_ai (SipPulse AI streaming gateway, pt-BR). Both speak the /v1/listen protocol. Defaults to deepgram.",
+      "type": "string",
+      "enum": [
+        "deepgram",
+        "sippulse_ai"
+      ]
+    },
+    "TranscriptionUrl": {
+      "title": "Live transcription base URL",
+      "description": "HTTPS base of the provider, e.g. https://api.deepgram.com; the WebSocket is <base as wss>/v1/listen.",
+      "type": "string"
+    },
+    "TranscriptionApiKey": {
+      "title": "Live transcription API key",
+      "description": "Key for the transcription provider (Deepgram: a usage:write key). Readable on every enrolled machine: use a dedicated, rotatable key.",
+      "type": "string"
+    },
+    "SipPulseAiUrl": {
+      "title": "SipPulse AI base URL (notes)",
+      "description": "HTTPS base of the SipPulse AI API used for live notes and the final report (.../v1/openai/chat/completions), e.g. https://api.sippulse.ai.",
+      "type": "string"
+    },
     "SipPulseAiApiKey": {
-      "title": "SipPulse AI API key (pilot)",
-      "description": "Enables live transcription (pulse-stt-streaming-v1) and meeting notes/report. Must be a key for the SipPulse AI dev environment (api.dev.sippulse.ai). Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "title": "SipPulse AI API key (notes)",
+      "description": "Key for the same environment as SipPulseAiUrl. Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "type": "string"
+    },
+    "TypeSafeUrl": {
+      "title": "TypeSafe base URL",
+      "description": "HTTPS base of the TypeSafe API (.../v1/systemone).",
       "type": "string"
     },
     "TypeSafeApiKey": {

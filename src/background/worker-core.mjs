@@ -29,6 +29,7 @@ export const MESSAGE_TYPES = new Set([
   "capture_cancelled",
   "start_ai_capture",
   "ai_session_result",
+  "ai_tab_ended",
   "live_update",
   "retry_queue_item",
   "discard_queue_item",
@@ -258,6 +259,7 @@ export function createWorkerCore({
       collaborator: profile,
       captions: record.utterances || [],
       config: {
+        transcriptionApiKey: config.transcriptionApiKey,
         sippulseAiApiKey: config.sippulseAiApiKey,
         typesafeApiKey: config.typesafeApiKey,
         transcription: config.transcription,
@@ -460,6 +462,15 @@ export function createWorkerCore({
     return result;
   }
 
+  // The Meet tab closed or crashed while recording. Finalize now instead of
+  // waiting for the stale-meeting pass; a call_ended that did arrive has
+  // already moved the session to finalizing, which makes this a no-op.
+  async function finalizeAfterTabEnded(meetingId) {
+    const session = await getAiSession(meetingId);
+    if (session?.state !== "recording") return { ok: true, ignored: true };
+    return finalizeMeeting(meetingId, "final");
+  }
+
   // Reported by the offscreen document once the streams have flushed and the
   // final analysis has run, so the worker never stays alive across either.
   async function completeAiSession(meetingId, result) {
@@ -530,7 +541,7 @@ export function createWorkerCore({
 
   async function deliverVcon(vconDocument, deliveryKind) {
     const config = await getConfig();
-    const result = await postVcon(vconDocument, config.endpointUrl, config.bearerToken, deliveryKind);
+    const result = await postVcon(vconDocument, config.endpointUrl, config.hmacSecret, deliveryKind);
     if (result.ok) {
       await removeQueuedForMeeting(vconDocument.uuid);
       await storage.setDeliveryStatus({
@@ -545,36 +556,73 @@ export function createWorkerCore({
     return { ok: false, queued: true, error: result.error };
   }
 
-  async function postVcon(document, endpointUrl, bearerToken, deliveryKind) {
-    const config = configLib.normalize({ EndpointUrl: endpointUrl, BearerToken: bearerToken });
-    if (!config.configured) return { ok: false, error: config.error };
+  // X-MeetVcon-Signature: sha256=<hex HMAC-SHA256 of the exact body>, as
+  // verified by the CRM vCon store (sippulse-website src/lib/vcon-ingest.ts).
+  async function sign(body, secret) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const digest = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
+    return `sha256=${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  }
 
+  async function signedPost(endpointUrl, hmacSecret, body, extraHeaders = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    const headers = {
-      "Content-Type": "application/vcon+json",
-      "X-SipPulse-Delivery": deliveryKind,
-      "X-SipPulse-Transcription-Source":
-        document.attachments?.[0]?.body?.transcription_source || "google_captions",
-      Authorization: `Bearer ${bearerToken}`,
-    };
     try {
       const response = await fetch(endpointUrl, {
         method: "POST",
-        headers,
-        body: JSON.stringify(document),
+        headers: {
+          "Content-Type": "application/json",
+          "X-MeetVcon-Signature": await sign(body, hmacSecret),
+          ...extraHeaders,
+        },
+        body,
         signal: controller.signal,
       });
-      if (response.ok) return { ok: true, status: response.status };
-      return { ok: false, error: `HTTP ${response.status}`, status: response.status };
+      const payload = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, payload };
     } catch (error) {
-      return {
-        ok: false,
-        error: error.name === "AbortError" ? "Request timed out" : error.message,
-      };
+      return { ok: false, error: error.name === "AbortError" ? "Request timed out" : error.message };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  // 202 accepted, 200 duplicate (the store keeps the first copy of a uuid).
+  async function postVcon(document, endpointUrl, hmacSecret, deliveryKind) {
+    const config = configLib.normalize({ EndpointUrl: endpointUrl, HmacSecret: hmacSecret });
+    if (!config.configured) return { ok: false, error: config.error };
+    const result = await signedPost(endpointUrl, hmacSecret, JSON.stringify(document), {
+      "X-SipPulse-Delivery": deliveryKind,
+      "X-SipPulse-Transcription-Source":
+        document.attachments?.[0]?.body?.transcription_source || "google_captions",
+    });
+    if (result.ok) {
+      return { ok: true, status: result.status, duplicate: result.payload?.status === "duplicate" };
+    }
+    if (result.status) {
+      return { ok: false, status: result.status, error: result.payload?.error || `HTTP ${result.status}` };
+    }
+    return { ok: false, error: result.error };
+  }
+
+  // The store has no test mode: any valid vCon is stored and emailed. Send a
+  // signed body that is not a vCon instead. The store checks the signature
+  // before parsing, so 400 proves the secret is right and nothing is stored.
+  async function probeStorage(config) {
+    if (!config.configured) return { ok: false, error: config.error };
+    const result = await signedPost(config.endpointUrl, config.hmacSecret, JSON.stringify({ connection_test: true }));
+    if (result.status === 400) return { ok: true, status: 400, detail: "Signature accepted" };
+    if (result.status === 401) return { ok: false, status: 401, error: "HMAC secret rejected" };
+    if (result.status === 503) return { ok: false, status: 503, error: "vCon store is not configured on the server" };
+    if (result.status) return { ok: false, status: result.status, error: `HTTP ${result.status}` };
+    return { ok: false, error: result.error };
   }
 
   async function enqueue(document, endpointUrl, deliveryKind, error) {
@@ -609,7 +657,7 @@ export function createWorkerCore({
     }
 
     const config = await getConfig();
-    const result = await postVcon(payload.document, payload.endpointUrl, config.bearerToken, item.deliveryKind);
+    const result = await postVcon(payload.document, payload.endpointUrl, config.hmacSecret, item.deliveryKind);
     if (result.ok) {
       await secureStore.remove(`queue:${id}`);
       await chrome.alarms.clear(retryAlarmName(id));
@@ -728,7 +776,18 @@ export function createWorkerCore({
         localValue: secret ? mask(local[field]) : local[field] ?? "",
       };
     }
-    return { ok: true, fields };
+    const config = await getConfig();
+    return { ok: true, fields, origins: config.origins, missingOrigins: await missingOrigins(config) };
+  }
+
+  // Configured hosts the user has not granted yet (optional host
+  // permissions are requested from the options page).
+  async function missingOrigins(config) {
+    const missing = [];
+    for (const origin of config.origins) {
+      if (!(await chrome.permissions.contains({ origins: [origin] }))) missing.push(origin);
+    }
+    return missing;
   }
 
   // settings: new values (empty secret = keep); remove: fields to clear.
@@ -755,10 +814,8 @@ export function createWorkerCore({
         delete next[field];
       }
     }
-    if (next.EndpointUrl) {
-      const checked = configLib.normalize({ EndpointUrl: next.EndpointUrl, BearerToken: "check" });
-      if (!checked.configured) return { ok: false, error: checked.error };
-    }
+    const invalid = Object.values(configLib.normalize(next).errors);
+    if (invalid.length) return { ok: false, error: invalid.join("; ") };
     await secureStore.put(LOCAL_SETTINGS_ID, { settings: next, savedAt: iso() });
     profileCache = undefined;
     return getSettings();
@@ -790,6 +847,7 @@ export function createWorkerCore({
         configured: config.configured,
         captureEnabled: config.captureEnabled,
         liveTranscriptionReady: config.liveTranscriptionReady,
+        transcriptionProvider: config.transcription.provider,
         analysisReady: config.analysisReady,
         classificationReady: config.classificationReady,
         error: config.error,
@@ -807,6 +865,7 @@ export function createWorkerCore({
       lastTranscript: lastMeta[LAST_TRANSCRIPT_META_KEY] || null,
       collaboratorEmail: profile?.email || "",
       collaboratorAuthorized: configLib.isAllowedEmail(profile?.email, config),
+      missingOrigins: await missingOrigins(config),
     };
   }
 
@@ -815,30 +874,30 @@ export function createWorkerCore({
     if (!(await isAuthorizedEmail(profile?.email))) {
       return { ok: false, error: IDENTITY_ERROR };
     }
-    const at = iso();
-    const document = assembleVcon(
-      {
-        uuid: vcon.uuidv4(),
-        meetingId: "connection-test",
-        meetingUrl: "https://meet.google.com/connection-test",
-        subject: "SipPulse connection test",
-        startedAt: at,
-        captionsEnabled: true,
-        utterances: [{ speaker: "SipPulse", text: "Connection test", start: at, duration: 1 }],
-      },
-      "test",
-      "google_captions",
-      profile
-    );
     const config = await getConfig();
-    const [storageResult, sippulseAiResult, typesafeResult] = await Promise.all([
-      postVcon(document, config.endpointUrl, config.bearerToken, "test"),
+    const missing = await missingOrigins(config);
+    if (missing.length) {
+      const error = `Allow access to ${missing.join(", ")} in Settings first`;
+      return { ok: false, error, services: {} };
+    }
+    const [storageResult, transcriptionResult, sippulseAiResult, typesafeResult] = await Promise.all([
+      probeStorage(config),
+      transcription.checkKey(fetch, {
+        provider: config.transcription.provider,
+        apiBase: config.transcription.apiBase,
+        apiKey: config.transcriptionApiKey,
+      }),
       analysis.checkKey(fetch, config.analysis.apiBase, config.sippulseAiApiKey),
       classification.checkKey(fetch, config.classification.apiBase, config.typesafeApiKey),
     ]);
     return {
       ...storageResult,
-      services: { storage: storageResult, sippulseAi: sippulseAiResult, typesafe: typesafeResult },
+      services: {
+        storage: storageResult,
+        transcription: transcriptionResult,
+        sippulseAi: sippulseAiResult,
+        typesafe: typesafeResult,
+      },
     };
   }
 
@@ -914,6 +973,8 @@ export function createWorkerCore({
         return startAiCapture(message.meetingId, message.tabId);
       case "ai_session_result":
         return completeAiSession(message.meetingId, message.result);
+      case "ai_tab_ended":
+        return finalizeAfterTabEnded(message.meetingId);
       case "live_update":
         return relayLiveUpdate(message.meetingId, message.update);
       case "retry_queue_item":

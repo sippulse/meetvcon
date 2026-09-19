@@ -1,51 +1,83 @@
 # SipPulse Meet Ingestion Contract
 
-The extension sends every finished meeting to the managed `EndpointUrl` as a
-single vCon. Transcription, classification, and meeting analysis happen during
-the call, so the ingestion service never receives audio: it stores the vCon in
-CRM and emails the transcript and report to the collaborator.
+The extension sends every finished meeting as a single vCon to the configured
+vCon store (`EndpointUrl`). No endpoint is built in; the hosts below are
+SipPulse's deployment. SipPulse's store lives inside the CRM,
+`POST https://crm.sippulse.com/api/vcons/ingest`, implemented in the
+`sippulse-website` repository
+(`src/app/api/vcons/ingest/route.ts`, `src/lib/vcon-ingest.ts`). Transcription,
+classification, and meeting analysis happen during the call, so the store
+never receives audio.
 
 ## Where each step runs
 
-| Step | Where | Credential |
+| Step | Where (SipPulse's configuration) | Credential |
 |---|---|---|
-| Live transcription | Offscreen document → SipPulse AI gateway `wss://api.dev.sippulse.ai/v1/listen` (Deepgram-compatible protocol, `pulse-stt-streaming-v1`, `pt-BR`, mono linear16 8 kHz, `endpointing=700`). One WebSocket for the microphone, one for the Meet tab. | `SipPulseAiApiKey` policy, sent as `Sec-WebSocket-Protocol: token, <key>` |
+| Live transcription | Offscreen document → `TranscriptionUrl` as `wss://…/v1/listen`, one mono linear16 WebSocket for the microphone and one for the Meet tab. `deepgram` (current): `wss://api.deepgram.com`, nova-3, `language=multi`, 16 kHz, diarized, `mip_opt_out`. `sippulse_ai`: `wss://api.dev.sippulse.ai`, `pulse-stt-streaming-v1`, pt-BR, 8 kHz, `endpointing=700` | `TranscriptionApiKey`, sent as `Sec-WebSocket-Protocol: token, <key>` |
 | Inline classification | Offscreen document → TypeSafe `POST https://api.typesafe.ai/v1/systemone` (`jev-latest`) once per final transcript segment: intent (Choice), sentiment (Score 0–4), action item (Noul) | `TypeSafeApiKey` policy, `Authorization: Bearer` |
-| Live notes and final report | Offscreen document → SipPulse AI `POST https://api.dev.sippulse.ai/v1/openai/chat/completions` (`deepseek-v4.1-flash`, JSON schema) | `SipPulseAiApiKey` policy, `api-key` header |
-| vCon storage and email | Service worker → `EndpointUrl` | `BearerToken` policy (pilot) |
+| Live notes and final report | Offscreen document → SipPulse AI `POST https://api.sippulse.ai/v1/openai/chat/completions` (`deepseek-v4.1-flash`, JSON schema) | `SipPulseAiApiKey` policy, `api-key` header |
+| vCon store (CRM) | Service worker → `https://crm.sippulse.com/api/vcons/ingest` | `HmacSecret` (the CRM's `VCON_HMAC_SECRET`), `X-MeetVcon-Signature` |
 
-The streaming model is only deployed on the SipPulse AI **dev** environment
-for now, so the key must be a dev key; production will be `api.sippulse.ai`
-(`SIPPULSE_AI_HOST` in `src/lib/config.js`). The model itself is multilingual
-(a nemotron-asr derivative), but the dev gateway validates
+SipPulse currently streams to **Deepgram**: the SipPulse AI streaming model
+is only deployed on the dev environment, which is out until Monday. Switching
+back is configuration only (`TranscriptionProvider=sippulse_ai`,
+`TranscriptionUrl=https://api.dev.sippulse.ai`, a dev key). The SipPulse model
+is multilingual (a nemotron-asr derivative), but the dev gateway validates
 `language ∈ {pt-BR, pt}` and rejects anything else at the handshake with
-HTTP 400 `UNSUPPORTED_LANGUAGE`; when it opens up, change `language` in
-`TRANSCRIPTION`.
+HTTP 400 `UNSUPPORTED_LANGUAGE`; per-provider parameters live in `PROFILES`
+in `src/lib/transcription.js`.
 
-The gateway does not diarize. The collaborator is identified by the
-microphone stream; each remote segment is named from the Google Meet caption
-that overlaps it in time, or `Participant` when there is none.
+The collaborator is always identified by the microphone stream. Deepgram
+diarizes the tab stream and each remote voice is named from the Google Meet
+captions it overlaps (`Speaker N` when none match); the SipPulse gateway does
+not diarize, so each remote segment is named on its own (`Participant` when
+no caption matches).
 
 ## vCon requests
 
-`POST EndpointUrl` with `Content-Type: application/vcon+json`,
-`Authorization: Bearer <BearerToken>`, and headers:
+`POST <EndpointUrl>` with the vCon as the JSON body and:
 
-- `X-SipPulse-Delivery: final|recovered|test`
-- `X-SipPulse-Transcription-Source`, one of:
-  - `sippulse_ai_live` — full live transcript plus the final report
-  - `sippulse_ai_live_recovered` — the recorder did not report back; the
-    transcript was rebuilt from segments saved during the call, with the latest
-    live notes and the classifications made so far
-  - `google_captions` — live transcription was never started
-  - `google_captions_fallback` — live transcription produced nothing usable
+- `X-MeetVcon-Signature: sha256=<hex>` — HMAC-SHA256 of the exact request
+  body with the shared `VCON_HMAC_SECRET`. The store verifies it before
+  parsing and answers `401 {"error":"invalid signature"}` otherwise.
+- `X-SipPulse-Delivery: final|recovered` and `X-SipPulse-Transcription-Source`
+  (below). The store does not read them today; they are there for logs and a
+  future upgrade rule.
 
-`final` and `recovered` requests atomically upsert the vCon and enqueue one
-email to `attachments[].body.captured_by_user.email`. `test` requests carry
-`google_captions` as the source and must not be stored or emailed. Until SSO
-is in place, `captured_by_user.email` is asserted by the client; do not use it
-for authorization, and restrict email delivery to allowed company domains
-server-side.
+Transcription sources:
+
+- `sippulse_ai_live` — full live transcript plus the final report
+- `sippulse_ai_live_recovered` — the recorder did not report back; the
+  transcript was rebuilt from segments saved during the call, with the latest
+  live notes and the classifications made so far
+- `google_captions` — live transcription was never started
+- `google_captions_fallback` — live transcription produced nothing usable
+
+Responses:
+
+| Status | Body | Extension |
+|---|---|---|
+| 202 | `{"status":"accepted","uuid","id"}` | delivered |
+| 200 | `{"status":"duplicate","uuid","id"}` | delivered (the store already has that uuid) |
+| 400 | `{"error": "..."}` — not JSON or not a valid vCon | queued, retried, then needs attention |
+| 401 | `{"error":"invalid signature"}` | queued; fix the secret |
+| 503 | `{"error":"server not configured"}` — no `VCON_HMAC_SECRET` on the server | queued |
+
+**There is no test mode:** every valid vCon is stored and goes through the
+CRM's AI pipeline and email. The options page's connection test therefore
+sends a signed body that is *not* a vCon (`{"connection_test":true}`): `400`
+proves the secret is right, `401` that it is wrong, and nothing is stored.
+
+### What the CRM does with it
+
+- Stores the raw vCon, indexes participants, and suggests an anchor company
+  from participant emails (exact contact email, then domain).
+- Flags `internal=1` when every party that has a `mailto` is `@sippulse.com`.
+- A worker (`src/lib/vcon-worker.ts`) runs its own SipPulse AI pass (summary
+  in pt-BR, a topic among discovery/demo/support/commercial/technical/
+  internal/other, company suggestion) and emails the capturer
+  (`attachments[].body.captured_by_user.email`, only `@sippulse.com`, subject
+  to `VCON_EMAIL_ALLOWLIST`) with that summary and the transcript.
 
 ### Document shape
 
@@ -86,18 +118,26 @@ reference.
 
 ## Reliability and responses
 
-Use the vCon `uuid` as the idempotency key, with `test` requests handled
-separately. The extension may deliver the same UUID twice when a response is
-lost; a later request must not replace a completed `sippulse_ai_live` vCon with
-a recovered or caption-based one, and must not trigger a second email. Return
-HTTP 200/202 on success; processing failures must use a non-2xx status so the
-extension's encrypted outbox retries. The CRM vCon follows the CRM's retention
-policy; email delivery must be auditable without retaining a second transcript
-copy in the ingestion service.
+The store is idempotent by vCon `uuid` and **keeps the first copy**: a later
+delivery of the same uuid answers `duplicate` without replacing it. The
+extension delivers once per meeting (live result, else saved segments, else
+captions) and retries the same document, so this is safe; it also means a
+better transcript can never replace a worse one after the fact.
 
-The audio multipart upload (`transcription_provider=sippulse_ai`,
-`pulse-telephony`) used by version 0.2 is no longer sent and can be retired
-once no 0.2 installations remain.
+## Gaps on the CRM side
+
+These are CRM changes, not extension changes:
+
+1. **Every captured meeting is flagged internal.** Google Meet does not expose
+   participant emails, so only the collaborator's party has a `mailto`
+   (`@sippulse.com`), and `isInternalMeeting` sees "all emails are
+   SipPulse". Customer meetings then stay out of the company views and get no
+   company suggestion. Parties without `mailto` should make a meeting
+   *not internal* (or unknown).
+2. **The email ignores the extension's report.** The CRM runs a second LLM
+   pass and emails only its own summary and the transcript. It could use the
+   `meeting_insights` entry (summary, action items, decisions, intents) and
+   `speaker_analytics` when present, and skip the second pass.
 
 ## Verifying against the real services
 

@@ -4,13 +4,11 @@
   "version": "0.3.0",
   "description": "Live Google Meet transcription, notes, and meeting reports delivered to SipPulse CRM.",
   "minimum_chrome_version": "120",
-
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-
   "permissions": [
     "activeTab",
     "storage",
@@ -20,22 +18,21 @@
     "offscreen",
     "tabCapture"
   ],
-
   "host_permissions": [
-    "https://meet.google.com/*",
-    "https://api.sippulse.com/*",
-    "https://api.dev.sippulse.ai/*",
-    "https://api.typesafe.ai/*"
+    "https://meet.google.com/*"
   ],
-
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"
   },
-
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
+      "matches": [
+        "https://meet.google.com/*"
+      ],
       "js": [
         "src/lib/logger.js",
         "src/lib/config.js",
@@ -50,20 +47,19 @@
         "src/content/in-call-panel.js",
         "src/content/main.js"
       ],
-      "css": ["src/content/panel.css"],
+      "css": [
+        "src/content/panel.css"
+      ],
       "run_at": "document_idle"
     }
   ],
-
   "options_ui": {
     "page": "src/options/options.html",
     "open_in_tab": true
   },
-
   "storage": {
     "managed_schema": "enterprise-policy.json"
   },
-
   "action": {
     "default_title": "SipPulse Meet Capture",
     "default_popup": "src/popup/popup.html",

@@ -2,11 +2,13 @@
 // worker, the Meet content script, and unit tests. Pure functions only: the
 // WebSockets live in src/offscreen/offscreen.js.
 //
-// The SipPulse AI streaming gateway speaks the Deepgram /v1/listen protocol
-// but accepts mono audio only, so the recorder opens one stream per source:
-// channel 0 is the collaborator's microphone, channel 1 is the Meet tab
-// (every remote participant). The gateway does not diarize; remote segments
-// are named one by one from Google Meet caption labels.
+// Two providers speak the same /v1/listen WebSocket protocol: Deepgram and
+// the SipPulse AI streaming gateway (Deepgram-compatible, mono only). The
+// recorder opens one mono stream per source either way: channel 0 is the
+// collaborator's microphone, channel 1 is the Meet tab (every remote
+// participant). Deepgram diarizes the tab stream; the SipPulse gateway does
+// not, so its remote segments are named one by one from Google Meet
+// captions.
 
 (function (root) {
   const ns = (root.MeetVcon = root.MeetVcon || {});
@@ -26,19 +28,70 @@
   // Meet's own caption label for the local participant, by UI language.
   const SELF_CAPTION_LABELS = new Set(["you", "você", "voce", "tú", "tu", "usted", "vous", "du", "sie"]);
 
-  // Only parameters the gateway documents; it clamps endpointing to
-  // [560, 1500] ms.
-  function listenUrl({ streamBase, model, language, sampleRate, endpointing }) {
+  // Model choices per provider (not endpoints; those come from config).
+  const PROFILES = Object.freeze({
+    deepgram: Object.freeze({
+      model: "nova-3",
+      // Code-switching PT/ES/EN (nova-3 multilingual).
+      language: "multi",
+      sampleRate: 16_000,
+      params: Object.freeze({
+        diarize: "true",
+        punctuate: "true",
+        smart_format: "true",
+        utterance_end_ms: "1000",
+        // Deepgram recommends 100 ms endpointing for code-switching.
+        endpointing: "100",
+        // Keep meeting audio out of Deepgram's model-improvement program.
+        mip_opt_out: "true",
+      }),
+    }),
+    sippulse_ai: Object.freeze({
+      model: "pulse-stt-streaming-v1",
+      // The model is multilingual, but the gateway accepts only pt-BR|pt.
+      language: "pt-BR",
+      sampleRate: 8_000,
+      // Only parameters the gateway documents; it clamps endpointing to
+      // [560, 1500] ms and rejects unknown languages.
+      params: Object.freeze({ endpointing: "700" }),
+    }),
+  });
+
+  function profile(provider) {
+    return PROFILES[provider] || null;
+  }
+
+  function listenUrl({ streamBase, provider }) {
+    const chosen = profile(provider);
+    if (!chosen) throw new Error(`Unknown transcription provider ${provider}`);
     const params = new URLSearchParams({
-      model,
-      language,
+      model: chosen.model,
+      language: chosen.language,
       encoding: "linear16",
-      sample_rate: String(sampleRate),
+      sample_rate: String(chosen.sampleRate),
       channels: "1",
       interim_results: "true",
-      endpointing: String(endpointing),
+      ...chosen.params,
     });
     return `${streamBase}/v1/listen?${params}`;
+  }
+
+  // Key check for the options page. Deepgram: a listen-only key may be
+  // refused project listing (403) yet be valid; only 401 means a bad key.
+  async function checkKey(fetchImpl, { provider, apiBase, apiKey }) {
+    if (!apiKey || !apiBase) return { ok: false, error: "Not configured" };
+    const request =
+      provider === "deepgram"
+        ? [`${apiBase}/v1/projects`, { headers: { Authorization: `Token ${apiKey}` } }]
+        : [`${apiBase}/v1/openai/models`, { headers: { "api-key": apiKey } }];
+    try {
+      const response = await fetchImpl(...request);
+      if (response.status === 401) return { ok: false, status: 401, error: "Key rejected" };
+      const ok = response.ok || (provider === "deepgram" && response.status === 403);
+      return ok ? { ok: true, status: response.status } : { ok: false, status: response.status, error: `HTTP ${response.status}` };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
   }
 
   function mostCommon(values) {
@@ -357,7 +410,10 @@
     MIC_CHANNEL,
     TAB_CHANNEL,
     UNKNOWN_REMOTE,
+    PROFILES,
+    profile,
     listenUrl,
+    checkKey,
     parseMessage,
     appendSegment,
     dropEcho,

@@ -22,8 +22,10 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
    in the encrypted local recovery record until final delivery.
 3. The collaborator starts live transcription with one extension action. The
    Meet tab (remote participants) and local microphone stream as separate mono
-   streams to the SipPulse AI streaming gateway (`pulse-stt-streaming-v1`,
-   pt-BR), and the panel stays visible throughout.
+   streams to the configured `/v1/listen` provider — Deepgram nova-3
+   (multilingual, diarized) today, or the SipPulse AI streaming gateway
+   (`pulse-stt-streaming-v1`, pt-BR) — and the panel stays visible
+   throughout.
 4. Every final transcript line is classified inline by TypeSafe's Jev model
    (intent, sentiment, action item) within about a second and tagged in the
    live transcript.
@@ -47,8 +49,13 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
 
 ## Configuration
 
-Settings are vCon storage (`EndpointUrl`, `BearerToken`), email scope
-(`AllowedEmailDomains`), `SipPulseAiApiKey`, and `TypeSafeApiKey`. They come
+No endpoint is built in (open source). Settings are the vCon store
+(`EndpointUrl`, `HmacSecret`), email scope
+(`AllowedEmailDomains`), live transcription (`TranscriptionProvider`,
+`TranscriptionUrl`, `TranscriptionApiKey`), SipPulse AI notes
+(`SipPulseAiUrl`, `SipPulseAiApiKey`),
+and TypeSafe (`TypeSafeUrl`, `TypeSafeApiKey`). Configured hosts are optional
+host permissions granted at runtime. They come
 from Google Admin extension policy (preferred; locks the field) or, for fields
 the policy leaves unset, from local settings on the options page, stored
 encrypted. `CaptureEnabled` is a policy-only kill switch. Models and endpoints are
@@ -70,8 +77,8 @@ AI dev environment for now, so the SipPulse AI key must be a dev key.
   back to the transcript saved during the call, then to Google captions.
 - Keep an encrypted local copy of the last captured transcript that the
   collaborator can download as Markdown (with the report) or vCon.
-- Use timeouts, idempotency by vCon UUID, and fixed HTTPS destinations:
-  `api.sippulse.com`, `api.dev.sippulse.ai`, and `api.typesafe.ai`.
+- Use timeouts, idempotency by vCon UUID, and HTTPS-only destinations taken
+  from configuration; the manifest grants only `meet.google.com` up front.
 
 ## Known pilot limitations
 
@@ -80,7 +87,11 @@ AI dev environment for now, so the SipPulse AI key must be a dev key.
   short-lived tokens issued by SipPulse is the next security step.
 - The collaborator identity is the Chrome profile email, asserted by the
   client. The backend must derive authorization from the credential, not from
-  `captured_by_user.email`, until SSO replaces the managed bearer token.
+  `captured_by_user.email`, until SSO replaces the shared HMAC secret.
+- The CRM flags a meeting internal when every party with an email is
+  `@sippulse.com`. Meet does not expose participant emails, so today every
+  captured meeting is flagged internal (see `docs/INTERNAL_INGESTION.md`,
+  "Gaps on the CRM side").
 - Local encryption of caption records protects against casual reading of
   extension storage only; it is not a defense against profile-level access.
 - Microphone permission requires a one-time visit to the extension's

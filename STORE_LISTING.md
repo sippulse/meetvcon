@@ -29,9 +29,15 @@ report to the signed-in SipPulse collaborator.
   recorder reuses that grant.
 - `https://meet.google.com/*`: detect calls, capture caption fallback, and show
   the in-call disclosure/control panel.
-- `https://api.sippulse.com/*`: deliver the final vCon to SipPulse CRM storage.
-- `https://api.dev.sippulse.ai/*`: stream audio to SipPulse AI for live
-  transcription and send transcript text for meeting notes and the report.
+- Optional `https://*/*`: requested at runtime only for the servers the
+  organization configures (vCon store, transcription, SipPulse AI, TypeSafe);
+  nothing is granted until the collaborator allows each host. SipPulse's
+  configuration:
+- `https://crm.sippulse.com/*`: deliver the final vCon to the SipPulse CRM vCon store.
+- `https://api.deepgram.com/*`: verify the transcription key; audio streams
+  over Deepgram's WebSocket for live transcription.
+- `https://api.sippulse.ai/*`: send transcript text to SipPulse AI for meeting
+  notes and the report.
 - `https://api.typesafe.ai/*`: classify each transcript line's intent,
   sentiment, and action items.
 

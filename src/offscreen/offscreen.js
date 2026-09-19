@@ -1,7 +1,8 @@
 // Live meeting capture, started only by an explicit user action. The
 // collaborator's microphone (channel 0) and the Meet tab audio (channel 1)
-// each stream to the SipPulse AI gateway as mono 8 kHz linear16 over their
-// own WebSocket; no audio is stored. Final transcript segments and periodic
+// each stream as mono linear16 over their own /v1/listen WebSocket to the
+// configured provider (Deepgram or the SipPulse AI gateway); no audio is
+// stored. Final transcript segments and periodic
 // SipPulse AI notes are sent to the service worker as "live_update" messages,
 // which it relays to the Meet tab. When the meeting ends, the final transcript
 // and report are reported back as "ai_session_result", so the worker never
@@ -72,7 +73,7 @@ async function buildAudioGraph(current) {
   current.playback = new AudioContext();
   current.playback.createMediaStreamSource(current.tabStream).connect(current.playback.destination);
 
-  const { sampleRate } = current.config.transcription;
+  const { sampleRate } = current.profile;
   const context = new AudioContext({ sampleRate });
   await context.audioWorklet.addModule("pcm-worklet.js");
   const merger = context.createChannelMerger(transcription.CHANNELS.length);
@@ -102,7 +103,7 @@ function framesIn(buffer) {
 }
 
 function positionSec(current, stream) {
-  return stream.framesSent / current.config.transcription.sampleRate;
+  return stream.framesSent / current.profile.sampleRate;
 }
 
 function sendAudio(current, stream, buffer) {
@@ -121,7 +122,7 @@ function sendAudio(current, stream, buffer) {
 function connect(current, stream) {
   const socket = new WebSocket(transcription.listenUrl(current.config.transcription), [
     "token",
-    current.config.sippulseAiApiKey,
+    current.config.transcriptionApiKey,
   ]);
   socket.binaryType = "arraybuffer";
   stream.socket = socket;
@@ -369,7 +370,8 @@ async function startCapture(message) {
   if (session) {
     return { ok: false, error: "Another meeting is already being captured", code: "busy" };
   }
-  if (!message.config?.sippulseAiApiKey) {
+  const profile = transcription.profile(message.config?.transcription?.provider);
+  if (!message.config?.transcriptionApiKey || !message.config?.transcription?.streamBase || !profile) {
     return { ok: false, error: "Live transcription is not configured", code: "not_configured" };
   }
   const streams = await openStreams(message.streamId);
@@ -384,6 +386,7 @@ async function startCapture(message) {
     captions: message.captions || [],
     tabStream: streams.tabStream,
     microphoneStream: streams.microphoneStream,
+    profile,
     streamStartedAt: new Date().toISOString(),
     streams: Object.fromEntries(
       transcription.CHANNELS.map((channel) => [
@@ -412,8 +415,8 @@ async function startCapture(message) {
   session = current;
   for (const stream of Object.values(current.streams)) connect(current, stream);
 
-  // If the Meet tab closes or crashes, flush both streams and stop
-  // reconnecting; the worker's recovery pass finalizes what was transcribed.
+  // If the Meet tab closes or crashes, flush both streams, stop reconnecting,
+  // and tell the worker: the tab's own call_ended may never have been sent.
   current.tabStream.getAudioTracks().forEach((track) => {
     track.addEventListener("ended", () => {
       if (session !== current || current.stopping) return;
@@ -423,6 +426,7 @@ async function startCapture(message) {
         clearTimeout(stream.reconnectTimer);
         if (stream.socket?.readyState === WebSocket.OPEN) stream.socket.send(CLOSE_STREAM);
       }
+      post("ai_tab_ended", { meetingId: current.meetingId });
     });
   });
 
@@ -454,7 +458,11 @@ async function finish(current) {
   const result = {
     ok: true,
     streamStartedAt: current.streamStartedAt,
-    transcription: current.config.transcription,
+    transcription: {
+      provider: current.config.transcription.provider,
+      model: current.profile.model,
+      language: current.profile.language,
+    },
     utterances,
     stats,
     classifications: current.classifications,

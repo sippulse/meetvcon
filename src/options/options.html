@@ -19,7 +19,7 @@
         <h2 id="disclosure-title">Before you enable capture</h2>
         <ul>
           <li>Google caption text is captured automatically as a fallback.</li>
-          <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to <strong>SipPulse AI</strong>, which returns the transcript; audio is not stored by the extension.</li>
+          <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to the transcription provider your organization configured (<strong>Deepgram</strong> or <strong>SipPulse AI</strong>), which returns the transcript; audio is not stored by the extension.</li>
           <li>The transcript is sent to <strong>SipPulse AI</strong> during and after the call to produce notes: summary, topics, action items, decisions, and open questions.</li>
           <li>Each transcribed line is sent to <strong>TypeSafe</strong> (Jev model) to classify its intent, sentiment, and whether it is an action item.</li>
           <li>The final vCon, including the meeting report, is stored in SipPulse CRM and emailed to <strong id="email">your company email</strong>.</li>
@@ -59,25 +59,53 @@
         </p>
         <form id="settingsForm" autocomplete="off">
           <label class="field">
-            <span>vCon storage endpoint <em data-source="EndpointUrl"></em></span>
-            <input name="EndpointUrl" type="url" placeholder="https://api.sippulse.com/v1/meet-captures" />
+            <span>vCon store endpoint <em data-source="EndpointUrl"></em></span>
+            <input name="EndpointUrl" type="url" placeholder="https://crm.example.com/api/vcons/ingest" />
           </label>
           <label class="field">
-            <span>vCon storage token <em data-source="BearerToken"></em></span>
-            <input name="BearerToken" type="password" />
+            <span>vCon store HMAC secret <em data-source="HmacSecret"></em></span>
+            <input name="HmacSecret" type="password" />
           </label>
           <label class="field">
             <span>Allowed email domains <em data-source="AllowedEmailDomains"></em></span>
             <input name="AllowedEmailDomains" type="text" placeholder="sippulse.com" />
           </label>
           <label class="field">
-            <span>SipPulse AI API key (dev) <em data-source="SipPulseAiApiKey"></em></span>
+            <span>Live transcription provider <em data-source="TranscriptionProvider"></em></span>
+            <select name="TranscriptionProvider">
+              <option value="">Deepgram (default)</option>
+              <option value="deepgram">Deepgram</option>
+              <option value="sippulse_ai">SipPulse AI streaming</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Live transcription URL <em data-source="TranscriptionUrl"></em></span>
+            <input name="TranscriptionUrl" type="url" placeholder="https://api.deepgram.com" />
+          </label>
+          <label class="field">
+            <span>Live transcription API key <em data-source="TranscriptionApiKey"></em></span>
+            <input name="TranscriptionApiKey" type="password" />
+          </label>
+          <label class="field">
+            <span>SipPulse AI URL (notes) <em data-source="SipPulseAiUrl"></em></span>
+            <input name="SipPulseAiUrl" type="url" placeholder="https://api.sippulse.ai" />
+          </label>
+          <label class="field">
+            <span>SipPulse AI API key <em data-source="SipPulseAiApiKey"></em></span>
             <input name="SipPulseAiApiKey" type="password" />
+          </label>
+          <label class="field">
+            <span>TypeSafe URL <em data-source="TypeSafeUrl"></em></span>
+            <input name="TypeSafeUrl" type="url" placeholder="https://api.typesafe.ai" />
           </label>
           <label class="field">
             <span>TypeSafe API key <em data-source="TypeSafeApiKey"></em></span>
             <input name="TypeSafeApiKey" type="password" />
           </label>
+          <p id="access" class="hint hidden">
+            <span id="accessText"></span>
+            <button id="grantAccess" type="button" class="secondary">Allow access</button>
+          </p>
           <div class="actions">
             <button id="saveSettings" type="submit">Save settings</button>
             <button id="clearSettings" type="button" class="secondary">Remove local settings</button>

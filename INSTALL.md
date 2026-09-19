@@ -15,16 +15,30 @@ Each setting is read from two places, field by field:
 
 | Field | Meaning |
 |---|---|
-| `EndpointUrl` | vCon storage endpoint; must be on `https://api.sippulse.com` |
-| `BearerToken` | vCon storage token (pilot; replace with SSO) |
+| `EndpointUrl` | Required. HTTPS URL of the vCon store. SipPulse: `https://crm.sippulse.com/api/vcons/ingest` |
+| `HmacSecret` | Required. The store's shared secret (SipPulse CRM: `VCON_HMAC_SECRET`); every delivery is signed with it |
 | `AllowedEmailDomains` | Chrome profile domains allowed to capture and receive the email (default `sippulse.com`) |
-| `SipPulseAiApiKey` | Live transcription and notes. Must be a **dev** key (`api.dev.sippulse.ai`) |
-| `TypeSafeApiKey` | Jev inline classification |
+| `TranscriptionProvider` | `deepgram` (default; nova-3 multilingual, diarized) or `sippulse_ai` (SipPulse AI streaming gateway, pt-BR) |
+| `TranscriptionUrl` | HTTPS base of the transcription provider: `https://api.deepgram.com`, or `https://api.dev.sippulse.ai` for SipPulse streaming (dev only for now) |
+| `TranscriptionApiKey` | Transcription key (Deepgram: a dedicated `usage:write` key) |
+| `SipPulseAiUrl` | HTTPS base of SipPulse AI for live notes and the report: `https://api.sippulse.ai` |
+| `SipPulseAiApiKey` | Key for the same environment as `SipPulseAiUrl` |
+| `TypeSafeUrl` | HTTPS base of TypeSafe for Jev classification: `https://api.typesafe.ai` |
+| `TypeSafeApiKey` | TypeSafe key |
 | `CaptureEnabled` | Optional; `false` disables capture (policy only) |
 
-Without `SipPulseAiApiKey` only Google captions are captured (no live
-transcript or notes); without `TypeSafeApiKey` lines are not tagged and the
-report has no intents or sentiment.
+No endpoint is built into the extension (it is open source; each
+organization points it at its own servers). Without the vCon store nothing
+is delivered; without the SipPulse AI URL and key only Google captions are
+captured (no live transcript or notes); without the TypeSafe URL and key
+lines are not tagged and the report has no intents or sentiment.
+
+**Host access.** The manifest only asks for `meet.google.com`; every
+configured server is an *optional* host permission that Chrome grants per
+host. Saving settings asks for the hosts in the form; for URLs pushed by
+Google Admin, the options page shows **Allow access** (one click per
+collaborator, because Chrome only grants optional permissions from a user
+action). The popup points there while access is missing.
 
 ### Google Admin (admin.google.com)
 
@@ -44,17 +58,23 @@ or enrolled browsers), for the extension ID it is configured on.
 
 ```json
 {
-  "EndpointUrl": { "Value": "https://api.sippulse.com/v1/meet-captures" },
-  "BearerToken": { "Value": "ROTATABLE_PILOT_TOKEN" },
+  "EndpointUrl": { "Value": "https://crm.sippulse.com/api/vcons/ingest" },
+  "HmacSecret": { "Value": "CRM_VCON_HMAC_SECRET" },
   "AllowedEmailDomains": { "Value": ["sippulse.com"] },
-  "SipPulseAiApiKey": { "Value": "SIPPULSE_AI_DEV_KEY" },
+  "TranscriptionProvider": { "Value": "deepgram" },
+  "TranscriptionUrl": { "Value": "https://api.deepgram.com" },
+  "TranscriptionApiKey": { "Value": "DEEPGRAM_KEY" },
+  "SipPulseAiUrl": { "Value": "https://api.sippulse.ai" },
+  "SipPulseAiApiKey": { "Value": "SIPPULSE_AI_KEY" },
+  "TypeSafeUrl": { "Value": "https://api.typesafe.ai" },
   "TypeSafeApiKey": { "Value": "TYPESAFE_KEY" }
 }
 ```
 
 6. On a pilot machine, open `chrome://policy`, choose **Reload policies**, and
    check the extension's entries; then open the extension's options page: the
-   fields show "set by Google Admin" and are locked.
+   fields show "set by Google Admin" and are locked. Choose **Allow access**
+   once so Chrome lets the extension reach the configured servers.
 
 Leave a field out of the JSON to let collaborators set it locally.
 
@@ -98,7 +118,10 @@ to a configured machine, whether they came from policy or local settings:
 - Create a dedicated SipPulse AI dev key for Meet Capture with a spending
   limit, and rotate it on a schedule.
 - Create a dedicated TypeSafe key for Meet Capture.
-- Replace the bearer token with SipPulse SSO before broad deployment.
+- The HMAC secret is shared by every enrolled machine and the CRM; anyone who
+  reads it can post vCons to the CRM. Rotate it on the CRM
+  (`VCON_HMAC_SECRET`) and in policy together, and replace it with SipPulse
+  SSO before broad deployment.
 
 Before touching a real Meet, `npm run e2e:live` checks both keys and the
 whole pipeline with a synthetic meeting (see `docs/INTERNAL_INGESTION.md`).

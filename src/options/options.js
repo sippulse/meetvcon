@@ -14,9 +14,14 @@ const elements = {
   settingsForm: document.getElementById("settingsForm"),
   clearSettings: document.getElementById("clearSettings"),
   settingsMessage: document.getElementById("settingsMessage"),
+  access: document.getElementById("access"),
+  accessText: document.getElementById("accessText"),
+  grantAccess: document.getElementById("grantAccess"),
 };
 
-const SECRET_FIELDS = new Set(["BearerToken", "SipPulseAiApiKey", "TypeSafeApiKey"]);
+let missingOrigins = [];
+
+const SECRET_FIELDS = new Set(["HmacSecret", "TranscriptionApiKey", "SipPulseAiApiKey", "TypeSafeApiKey"]);
 const SOURCE_LABELS = {
   policy: "set by Google Admin",
   local: "saved on this computer",
@@ -41,10 +46,41 @@ function renderSettings(fields) {
   }
 }
 
+// The extension has no built-in hosts: Chrome must grant each configured
+// one, and only during a click.
+function renderAccess(origins) {
+  missingOrigins = origins || [];
+  elements.access.classList.toggle("hidden", missingOrigins.length === 0);
+  elements.accessText.textContent = `Chrome has not allowed the extension to reach ${missingOrigins
+    .map((origin) => origin.replace("/*", ""))
+    .join(", ")}. `;
+}
+
+function originsInForm() {
+  const value = (name) => elements.settingsForm.elements[name].value.trim();
+  return self.MeetVcon.config.originsFor({
+    endpointUrl: value("EndpointUrl"),
+    transcriptionUrl: value("TranscriptionUrl"),
+    sippulseAiUrl: value("SipPulseAiUrl"),
+    typesafeUrl: value("TypeSafeUrl"),
+  });
+}
+
+async function requestAccess(origins) {
+  if (!origins.length) return true;
+  try {
+    return await chrome.permissions.request({ origins });
+  } catch (error) {
+    elements.settingsMessage.textContent = error.message;
+    return false;
+  }
+}
+
 async function loadSettings() {
   const result = await chrome.runtime.sendMessage({ type: "get_settings" });
   if (!result?.ok) throw new Error(result?.error || "Could not load settings");
   renderSettings(result.fields);
+  renderAccess(result.missingOrigins);
 }
 
 async function saveSettings(message) {
@@ -55,7 +91,10 @@ async function saveSettings(message) {
     return;
   }
   renderSettings(result.fields);
-  elements.settingsMessage.textContent = "Saved.";
+  renderAccess(result.missingOrigins);
+  elements.settingsMessage.textContent = result.missingOrigins?.length
+    ? "Saved, but some hosts are not allowed yet."
+    : "Saved.";
   await refresh();
 }
 
@@ -72,15 +111,16 @@ async function refresh() {
       ? "Enabled"
       : "Disabled by administrator"
     : "Waiting for your consent";
+  const providers = { deepgram: "Deepgram nova-3, multilingual", sippulse_ai: "SipPulse AI streaming, Portuguese" };
   elements.provider.textContent = state.config.liveTranscriptionReady
-    ? "SipPulse AI streaming, Portuguese (Google captions fallback)"
-    : "Google captions only (SipPulse AI key not configured)";
+    ? `${providers[state.config.transcriptionProvider] || state.config.transcriptionProvider} (Google captions fallback)`
+    : "Google captions only (transcription URL and key not configured)";
   elements.notes.textContent = state.config.analysisReady
     ? "SipPulse AI"
-    : "Off (SipPulse AI key not configured)";
+    : "Off (SipPulse AI URL and key not configured)";
   elements.classification.textContent = state.config.classificationReady
     ? "TypeSafe Jev (intent, sentiment, action items)"
-    : "Off (TypeSafe key not configured)";
+    : "Off (TypeSafe URL and key not configured)";
   elements.accept.classList.toggle("hidden", state.consented);
   elements.revoke.classList.toggle("hidden", !state.consented);
   elements.test.disabled = !state.config.configured;
@@ -107,7 +147,8 @@ elements.test.addEventListener("click", async () => {
   const services = result?.services;
   elements.message.textContent = services
     ? [
-        describe("vCon storage", services.storage),
+        describe("CRM vCon store", services.storage),
+        describe("Transcription", services.transcription),
         describe("SipPulse AI", services.sippulseAi),
         describe("TypeSafe", services.typesafe),
       ].join(" · ")
@@ -115,17 +156,25 @@ elements.test.addEventListener("click", async () => {
   elements.test.disabled = false;
 });
 
-elements.settingsForm.addEventListener("submit", (event) => {
+elements.settingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const settings = {};
-  for (const input of elements.settingsForm.querySelectorAll("input")) {
+  for (const input of elements.settingsForm.querySelectorAll("input, select")) {
     if (!input.disabled) settings[input.name] = input.value;
   }
-  saveSettings({ settings });
+  // Ask first, while the click still counts as a user gesture.
+  await requestAccess([...new Set([...originsInForm(), ...missingOrigins])]);
+  await saveSettings({ settings });
+});
+
+elements.grantAccess.addEventListener("click", async () => {
+  await requestAccess(missingOrigins);
+  await loadSettings();
+  await refresh();
 });
 
 elements.clearSettings.addEventListener("click", () => {
-  const remove = [...elements.settingsForm.querySelectorAll("input")].map((input) => input.name);
+  const remove = [...elements.settingsForm.querySelectorAll("input, select")].map((input) => input.name);
   saveSettings({ remove });
 });
 

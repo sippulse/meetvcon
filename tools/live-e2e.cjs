@@ -1,10 +1,13 @@
 // End-to-end check of the live pipeline against the real services: the
 // actual offscreen recorder runs in Chromium, streams a synthetic two-voice
-// Portuguese meeting to the SipPulse AI gateway, classifies each line with
-// Jev, writes live notes and the final report, and prints the result.
+// Portuguese meeting to the configured transcription provider, classifies
+// each line with Jev, writes live notes and the final report with SipPulse
+// AI, and prints the result.
 //
-// Needs SIPPULSE_DEV_API_KEY and TYPESAFE_AI_KEY in the environment or in
-// .env. Keys are passed to the page and never printed.
+// Reads from the environment or .env (keys are passed to the page and never
+// printed): TRANSCRIPTION_PROVIDER (deepgram | sippulse_ai), TRANSCRIPTION_URL,
+// TRANSCRIPTION_API_KEY, SIPPULSE_AI_URL, SIPPULSE_AI_API_KEY (also used for
+// the TTS that voices the meeting), TYPESAFE_URL, TYPESAFE_AI_KEY.
 //
 //   npm run e2e:live
 
@@ -14,7 +17,6 @@ const { chromium } = require("playwright");
 
 const ROOT = path.join(__dirname, "..");
 const SAMPLE_RATE = 8000;
-const TTS_URL = "https://api.dev.sippulse.ai/v1/openai/audio/speech";
 const TURNS = [
   ["tab", "onyx", "Bom dia, Ana. Obrigado por entrar. Queria falar sobre a proposta da Vivanet."],
   ["mic", "nova", "Bom dia, Bruno. Claro. Qual é o volume de assinantes que eles querem contratar?"],
@@ -35,16 +37,30 @@ function readKeys() {
       }
     }
   }
-  const keys = { sippulse: env.SIPPULSE_DEV_API_KEY, typesafe: env.TYPESAFE_AI_KEY };
-  if (!keys.sippulse || !keys.typesafe) throw new Error("Set SIPPULSE_DEV_API_KEY and TYPESAFE_AI_KEY");
-  return keys;
+  const names = {
+    transcriptionProvider: "TRANSCRIPTION_PROVIDER",
+    transcriptionUrl: "TRANSCRIPTION_URL",
+    transcription: "TRANSCRIPTION_API_KEY",
+    sippulseUrl: "SIPPULSE_AI_URL",
+    sippulse: "SIPPULSE_AI_API_KEY",
+    typesafeUrl: "TYPESAFE_URL",
+    typesafe: "TYPESAFE_AI_KEY",
+  };
+  const settings = Object.fromEntries(Object.entries(names).map(([key, name]) => [key, env[name]]));
+  // A Deepgram key kept under its usual name also works.
+  if (!settings.transcription && settings.transcriptionProvider === "deepgram") {
+    settings.transcription = env.DEEPGRAM_API_KEY;
+  }
+  const missing = Object.entries(names).filter(([key]) => !settings[key]).map(([, name]) => name);
+  if (missing.length) throw new Error(`Set ${missing.join(", ")}`);
+  return settings;
 }
 
 // 24 kHz PCM from TTS, averaged down to 8 kHz.
-async function speak(apiKey, text, voice) {
-  const response = await fetch(TTS_URL, {
+async function speak(keys, text, voice) {
+  const response = await fetch(`${keys.sippulseUrl.replace(/\/+$/, "")}/v1/openai/audio/speech`, {
     method: "POST",
-    headers: { "api-key": apiKey, "Content-Type": "application/json" },
+    headers: { "api-key": keys.sippulse, "Content-Type": "application/json" },
     body: JSON.stringify({ model: "openai-tts", input: text, voice, response_format: "pcm" }),
   });
   if (!response.ok) throw new Error(`TTS HTTP ${response.status}`);
@@ -55,11 +71,11 @@ async function speak(apiKey, text, voice) {
   return out;
 }
 
-async function buildMeeting(apiKey) {
+async function buildMeeting(keys) {
   const clips = [];
   let cursor = SAMPLE_RATE;
   for (const [track, voice, text] of TURNS) {
-    const pcm = await speak(apiKey, text, voice);
+    const pcm = await speak(keys, text, voice);
     clips.push({ track, text, pcm, at: cursor });
     cursor += pcm.length + SAMPLE_RATE;
   }
@@ -77,7 +93,7 @@ async function buildMeeting(apiKey) {
 
 async function main() {
   const keys = readKeys();
-  const meeting = await buildMeeting(keys.sippulse);
+  const meeting = await buildMeeting(keys);
   const browser = await chromium.launch({
     // file:// origin: the extension bypasses CORS with host permissions.
     args: ["--disable-web-security", "--allow-file-access-from-files", "--autoplay-policy=no-user-gesture-required"],
@@ -112,7 +128,15 @@ async function main() {
     const collaborator = { email: "ana.souza@sippulse.com" };
     const started = await page.evaluate(
       async ({ keys, collaborator }) => {
-        const { config } = window.MeetVcon;
+        const config = window.MeetVcon.config.normalize({
+          TranscriptionProvider: keys.transcriptionProvider,
+          TranscriptionUrl: keys.transcriptionUrl,
+          TranscriptionApiKey: keys.transcription,
+          SipPulseAiUrl: keys.sippulseUrl,
+          SipPulseAiApiKey: keys.sippulse,
+          TypeSafeUrl: keys.typesafeUrl,
+          TypeSafeApiKey: keys.typesafe,
+        });
         const response = await window.__send({
           type: "ai_capture_start",
           streamId: "e2e",
@@ -122,12 +146,13 @@ async function main() {
           collaborator,
           captions: [],
           config: {
+            transcriptionApiKey: keys.transcription,
             sippulseAiApiKey: keys.sippulse,
             typesafeApiKey: keys.typesafe,
-            transcription: config.TRANSCRIPTION,
+            transcription: config.transcription,
             // A short meeting still gets live notes.
-            analysis: { ...config.ANALYSIS, liveIntervalMs: 15_000 },
-            classification: config.CLASSIFICATION,
+            analysis: { ...config.analysis, liveIntervalMs: 15_000 },
+            classification: config.classification,
           },
         });
         window.__play();

@@ -10,12 +10,13 @@ to the capturing collaborator (`@sippulse.com` by default; the
 
 ## How it works
 
-- **Live transcription (SipPulse AI):** the collaborator clicks the extension
-  action once during the meeting. The offscreen recorder streams the
-  collaborator's microphone and the Meet tab as two mono 8 kHz streams to the
-  SipPulse AI gateway (`pulse-stt-streaming-v1`, pt-BR, Deepgram-compatible
-  protocol, dev environment). Remote lines are named from Google Meet caption
-  labels. No audio is stored.
+- **Live transcription (Deepgram or SipPulse AI):** the collaborator clicks
+  the extension action once during the meeting. The offscreen recorder
+  streams the collaborator's microphone and the Meet tab as two mono streams
+  over the `/v1/listen` protocol to the configured provider: Deepgram
+  (nova-3, multilingual PT/ES/EN, diarized) or the SipPulse AI gateway
+  (`pulse-stt-streaming-v1`, pt-BR). Remote voices are named from Google Meet
+  caption labels. No audio is stored.
 - **Inline classification (TypeSafe Jev):** each final line is classified in
   about 300 ms — intent (commitment, decision, question, objection, buying
   signal, problem, scheduling), sentiment, and action item — and tagged in
@@ -74,9 +75,11 @@ to publish on a SipPulse-owned page is in [docs/PRIVACY.md](./docs/PRIVACY.md).
 
 ## Security
 
-The extension talks only to `api.sippulse.com` (vCon storage),
-`api.dev.sippulse.ai` (transcription and notes), and `api.typesafe.ai`
-(classification). Audio is streamed and never stored.
+No server is built in: the extension only talks to the vCon store and
+providers configured by the organization (Google Admin or Settings), and
+Chrome must grant each of those hosts (optional host permissions). SipPulse
+configures its CRM vCon store (HMAC-signed), SipPulse AI (transcription and
+notes), and TypeSafe (classification). Audio is streamed and never stored.
 
 Caption records, outbox payloads, and the local "last transcript" copy are
 AES-GCM encrypted before they reach `chrome.storage.local`. Be precise about
@@ -91,9 +94,9 @@ Three pilot limitations must be closed before broad deployment:
   keys, and move to short-lived tokens issued by SipPulse.
 - **Identity is client-asserted.** The collaborator email comes from the Chrome
   profile and is sent inside the vCon. The backend must not trust it for
-  authorization until the bearer policy is replaced by SSO with server-side
-  validation.
-- **The managed bearer token is shared and readable on every enrolled machine.**
-  Treat it as rotatable and scope it to ingestion only.
+  authorization until the shared HMAC secret is replaced by SSO with
+  server-side validation.
+- **The vCon HMAC secret is shared and readable on every configured machine.**
+  Anyone holding it can post vCons to the CRM; rotate it on both sides.
 
 Report security issues privately to **security@sippulse.com**.

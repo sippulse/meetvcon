@@ -19,9 +19,12 @@ microphone.
 Data is used only for the stated transcription, analysis, and delivery
 purpose. Processors:
 
-- **SipPulse AI** receives the live audio stream and returns the transcript,
-  and receives transcript text during and after the call to write notes:
-  summary, topics, action items, decisions, and open questions.
+- **The transcription provider** configured by the organization (Deepgram,
+  or SipPulse AI's streaming service) receives the live audio stream and
+  returns the transcript. Deepgram streams opt out of its model-improvement
+  program.
+- **SipPulse AI** receives transcript text during and after the call to write
+  notes: summary, topics, action items, decisions, and open questions.
 - **TypeSafe** receives each transcript line, with the line before it, and
   returns its intent, sentiment, and whether it is an action item.
 - **SipPulse CRM and email** receive the final vCon and report, which are

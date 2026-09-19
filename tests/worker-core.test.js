@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadLibraries } = require("./helpers");
+const { createHmac } = require("node:crypto");
 const { createFakeChrome, createFakeSecureStore, createFakeFetch } = require("./fake-chrome");
 
 const LIBS = [
@@ -13,7 +14,14 @@ const LIBS = [
   "src/lib/analysis.js",
   "src/lib/classification.js",
 ];
-const ENDPOINT = "https://api.sippulse.com/v1/meet-captures";
+const ENDPOINT = "https://crm.sippulse.com/api/vcons/ingest";
+const HMAC_SECRET = "vcon-hmac-secret";
+
+// Same check as the CRM vCon store (sippulse-website src/lib/vcon-ingest.ts).
+function signatureValid(call, secret = HMAC_SECRET) {
+  const expected = createHmac("sha256", secret).update(call.init.body).digest("hex");
+  return call.init.headers["X-MeetVcon-Signature"] === `sha256=${expected}`;
+}
 const T0 = Date.parse("2026-09-04T12:00:00.000Z");
 
 async function setup({ fetchResponder, chromeOptions, policy = {} } = {}) {
@@ -23,8 +31,13 @@ async function setup({ fetchResponder, chromeOptions, policy = {} } = {}) {
   const chrome = createFakeChrome(chromeOptions);
   await chrome.storage.managed.set({
     EndpointUrl: ENDPOINT,
-    BearerToken: "pilot-token",
+    HmacSecret: HMAC_SECRET,
+    TranscriptionProvider: "deepgram",
+    TranscriptionUrl: "https://api.deepgram.com",
+    TranscriptionApiKey: "dg-key",
+    SipPulseAiUrl: "https://api.sippulse.ai",
     SipPulseAiApiKey: "sp-key",
+    TypeSafeUrl: "https://api.typesafe.ai",
     TypeSafeApiKey: "ts-key",
     ...policy,
   });
@@ -169,15 +182,21 @@ test("automatic retries exhaust into needs_attention and keep the payload; manua
   assert.equal((await status(chrome)).state, "delivered");
 });
 
-test("connection test uses a contract-valid source and also checks the SipPulse AI and TypeSafe keys", async () => {
-  const { core, fetch } = await setup();
+test("connection test proves the HMAC secret with a signed non-vCon probe, and checks the SipPulse AI and TypeSafe keys", async () => {
+  // The store verifies the signature first, then rejects the probe as not a vCon.
+  const { core, fetch } = await setup({
+    fetchResponder: (url) => (url === ENDPOINT ? { status: 400, body: { error: "vcon: missing" } } : { status: 200 }),
+  });
   const result = await send(core, { type: "test_connection" });
   assert.equal(result.ok, true);
+  assert.equal(result.services.storage.detail, "Signature accepted");
   const storageCall = fetch.calls.find((call) => call.url === ENDPOINT);
-  assert.equal(storageCall.init.headers["X-SipPulse-Delivery"], "test");
-  assert.equal(storageCall.init.headers["X-SipPulse-Transcription-Source"], "google_captions");
-  assert.equal(storageCall.init.headers.Authorization, "Bearer pilot-token");
-  const sippulse = fetch.calls.find((call) => call.url.startsWith("https://api.dev.sippulse.ai/"));
+  assert.deepEqual(JSON.parse(storageCall.init.body), { connection_test: true }, "never a real vCon");
+  assert.ok(signatureValid(storageCall));
+  const deepgram = fetch.calls.find((call) => call.url.startsWith("https://api.deepgram.com/"));
+  assert.equal(deepgram.init.headers.Authorization, "Token dg-key");
+  assert.equal(result.services.transcription.ok, true);
+  const sippulse = fetch.calls.find((call) => call.url.startsWith("https://api.sippulse.ai/"));
   assert.equal(sippulse.init.headers["api-key"], "sp-key");
   const typesafe = fetch.calls.find((call) => call.url.startsWith("https://api.typesafe.ai/"));
   assert.equal(typesafe.init.headers.Authorization, "Bearer ts-key");
@@ -232,10 +251,12 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
   assert.equal(start.streamId, "stream-for-tab-42");
   assert.equal(start.target, "offscreen");
+  assert.equal(start.config.transcriptionApiKey, "dg-key");
   assert.equal(start.config.sippulseAiApiKey, "sp-key");
   assert.equal(start.config.typesafeApiKey, "ts-key");
-  assert.equal(start.config.transcription.model, "pulse-stt-streaming-v1");
-  assert.equal(start.config.transcription.streamBase, "wss://api.dev.sippulse.ai");
+  assert.equal(start.config.transcription.provider, "deepgram");
+  assert.equal(start.config.transcription.streamBase, "wss://api.deepgram.com");
+  assert.equal(start.config.analysis.apiBase, "https://api.sippulse.ai/v1");
   assert.equal(start.config.analysis.model, "deepseek-v4.1-flash");
   assert.equal(start.config.classification.model, "jev-latest");
   assert.equal(start.collaborator.email, "ana@sippulse.com");
@@ -258,8 +279,8 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   assert.equal(popup.status.source, "sippulse_ai_live");
 });
 
-test("live capture is refused when the SipPulse AI key is not configured", async () => {
-  const { core, chrome } = await setup({ policy: { SipPulseAiApiKey: "" } });
+test("live capture is refused when the transcription key is not configured", async () => {
+  const { core, chrome } = await setup({ policy: { TranscriptionApiKey: "" } });
   const result = await startLive(core);
   assert.equal(result.ok, false);
   assert.match(result.error, /not configured/);
@@ -419,7 +440,15 @@ const OPTIONS = { url: "chrome-extension://test/src/options/options.html" };
 
 test("local settings fill what Google Admin policy leaves unset, and policy fields stay locked", async () => {
   const { core, chrome } = await setup({
-    policy: { EndpointUrl: "", BearerToken: "", SipPulseAiApiKey: "", TypeSafeApiKey: "" },
+    policy: {
+      EndpointUrl: "",
+      HmacSecret: "",
+      TranscriptionUrl: "",
+      TranscriptionApiKey: "",
+      SipPulseAiUrl: "",
+      SipPulseAiApiKey: "",
+      TypeSafeApiKey: "",
+    },
   });
   assert.equal((await send(core, { type: "get_popup_state" })).config.configured, false);
 
@@ -428,7 +457,10 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
       type: "save_settings",
       settings: {
         EndpointUrl: ENDPOINT,
-        BearerToken: "local-token",
+        HmacSecret: "local-secret",
+        TranscriptionUrl: "https://api.deepgram.com/",
+        TranscriptionApiKey: "local-dg-key-5678",
+        SipPulseAiUrl: "https://api.sippulse.ai/",
         SipPulseAiApiKey: "local-sp-key-1234",
         AllowedEmailDomains: "sippulse.com, example.com",
       },
@@ -446,7 +478,7 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
   assert.deepEqual(saved.fields.AllowedEmailDomains.value, ["sippulse.com", "example.com"]);
   assert.equal(saved.fields.TypeSafeApiKey.source, "default");
   const stored = JSON.stringify(await chrome.storage.local.get(null));
-  assert.equal(stored.includes("local-sp-key"), false, "keys are only in the encrypted store");
+  assert.equal(stored.includes("local-sp-key") || stored.includes("local-dg-key"), false, "keys are only in the encrypted store");
 
   const popup = await send(core, { type: "get_popup_state" });
   assert.equal(popup.config.configured, true);
@@ -456,6 +488,7 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
   assert.equal(started.ok, true);
   const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
   assert.equal(start.config.sippulseAiApiKey, "local-sp-key-1234");
+  assert.equal(start.config.transcriptionApiKey, "local-dg-key-5678");
 });
 
 test("policy wins over local settings, and saving never overrides a policy field", async () => {
@@ -475,8 +508,8 @@ test("policy wins over local settings, and saving never overrides a policy field
   assert.equal(start.config.typesafeApiKey, "ts-key");
 });
 
-test("an empty secret keeps the stored one, remove clears it, and bad endpoints are refused", async () => {
-  const { core } = await setup({ policy: { SipPulseAiApiKey: "", EndpointUrl: "", BearerToken: "" } });
+test("an empty secret keeps the stored one, remove clears it, and non-https endpoints are refused", async () => {
+  const { core } = await setup({ policy: { SipPulseAiApiKey: "", EndpointUrl: "", HmacSecret: "" } });
   await core.handleMessage({ type: "save_settings", settings: { SipPulseAiApiKey: "keep-me-9999" } }, OPTIONS);
   let result = await core.handleMessage({ type: "save_settings", settings: { SipPulseAiApiKey: "" } }, OPTIONS);
   assert.equal(result.fields.SipPulseAiApiKey.value, "••••9999");
@@ -484,11 +517,11 @@ test("an empty secret keeps the stored one, remove clears it, and bad endpoints 
   assert.equal(result.fields.SipPulseAiApiKey.source, "default");
 
   const refused = await core.handleMessage(
-    { type: "save_settings", settings: { EndpointUrl: "https://collector.example.com/vcon" } },
+    { type: "save_settings", settings: { EndpointUrl: "http://collector.example.com/vcon" } },
     OPTIONS
   );
   assert.equal(refused.ok, false);
-  assert.match(refused.error, /api\.sippulse\.com/);
+  assert.match(refused.error, /EndpointUrl must be an https:\/\/ URL/);
 });
 
 test("settings can only be read or changed from the extension's options page", async () => {
@@ -497,4 +530,66 @@ test("settings can only be read or changed from the extension's options page", a
   assert.equal((await core.handleMessage({ type: "get_settings" }, meetTab)).ok, false);
   assert.equal((await core.handleMessage({ type: "save_settings", settings: { SipPulseAiApiKey: "x" } }, meetTab)).ok, false);
   assert.equal((await core.handleMessage({ type: "get_settings" })).ok, false);
+});
+
+test("a Meet tab that closes without call_ended is finalized as soon as the recorder notices", async () => {
+  const { core, chrome } = await setup();
+  await startLive(core);
+
+  const result = await send(core, { type: "ai_tab_ended", meetingId: "abc-defg-hij" });
+
+  assert.equal(result.pending, true);
+  assert.equal(chrome.runtime._messages.filter((m) => m.type === "ai_capture_stop").length, 1);
+  assert.equal((await status(chrome)).state, "finalizing");
+  // The tab's own call_ended arriving later changes nothing.
+  assert.equal((await send(core, { type: "call_ended", meetingId: "abc-defg-hij" })).pending, true);
+  assert.equal((await send(core, { type: "ai_tab_ended", meetingId: "abc-defg-hij" })).ignored, true);
+  assert.equal(chrome.runtime._messages.filter((m) => m.type === "ai_capture_stop").length, 1);
+});
+
+test("every delivery is signed with the shared HMAC secret over the exact body sent", async () => {
+  const { core, fetch } = await setup({ fetchResponder: () => ({ status: 202, body: { status: "accepted" } }) });
+  await send(core, { type: "active_meeting_put", record: record() });
+  await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
+
+  assert.equal(fetch.calls[0].url, ENDPOINT);
+  assert.ok(signatureValid(fetch.calls[0]));
+  assert.equal(signatureValid(fetch.calls[0], "another-secret"), false);
+  assert.equal("Authorization" in fetch.calls[0].init.headers, false);
+});
+
+test("the store's duplicate response counts as delivered; a wrong secret is reported and queued", async () => {
+  const duplicate = await setup({ fetchResponder: () => ({ status: 200, body: { status: "duplicate" } }) });
+  await send(duplicate.core, { type: "active_meeting_put", record: record() });
+  const result = await send(duplicate.core, { type: "call_ended", meetingId: "abc-defg-hij" });
+  assert.equal(result.ok, true);
+  assert.equal(result.duplicate, true);
+
+  const rejected = await setup({
+    fetchResponder: (url) => (url === ENDPOINT ? { status: 401, body: { error: "invalid signature" } } : { status: 200 }),
+  });
+  const probe = await send(rejected.core, { type: "test_connection" });
+  assert.equal(probe.services.storage.error, "HMAC secret rejected");
+  await send(rejected.core, { type: "active_meeting_put", record: record() });
+  const failed = await send(rejected.core, { type: "call_ended", meetingId: "abc-defg-hij" });
+  assert.deepEqual([failed.queued, failed.error], [true, "invalid signature"]);
+});
+
+test("hosts the user has not allowed yet are reported, and the connection test says so instead of failing opaquely", async () => {
+  const { core, fetch } = await setup({ chromeOptions: { missingOrigins: ["https://api.typesafe.ai/*"] } });
+
+  const settings = await core.handleMessage({ type: "get_settings" }, OPTIONS);
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.origins)), [
+    "https://crm.sippulse.com/*",
+    "https://api.deepgram.com/*",
+    "https://api.sippulse.ai/*",
+    "https://api.typesafe.ai/*",
+  ]);
+  assert.deepEqual([...settings.missingOrigins], ["https://api.typesafe.ai/*"]);
+  assert.deepEqual((await send(core, { type: "get_popup_state" })).missingOrigins, ["https://api.typesafe.ai/*"]);
+
+  const tested = await send(core, { type: "test_connection" });
+  assert.equal(tested.ok, false);
+  assert.match(tested.error, /Allow access to https:\/\/api\.typesafe\.ai/);
+  assert.equal(fetch.calls.length, 0);
 });

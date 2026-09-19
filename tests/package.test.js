@@ -24,14 +24,9 @@ test("manifest references existing packaged files", () => {
   }
 });
 
-test("internal manifest has no arbitrary network destination", () => {
-  assert.deepEqual(manifest.host_permissions, [
-    "https://meet.google.com/*",
-    "https://api.sippulse.com/*",
-    "https://api.dev.sippulse.ai/*",
-    "https://api.typesafe.ai/*",
-  ]);
-  assert.equal("optional_host_permissions" in manifest, false);
+test("manifest builds in no destination: configured hosts are optional permissions granted at runtime", () => {
+  assert.deepEqual(manifest.host_permissions, ["https://meet.google.com/*"]);
+  assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
 });
 
 test("extension pages reference existing local assets", () => {

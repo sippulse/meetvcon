@@ -2,34 +2,28 @@
 // admin.google.com, read through chrome.storage.managed) and local settings
 // saved on the options page. Policy always wins and locks the field.
 //
-// Fields: vCon storage (EndpointUrl + BearerToken), who may capture and
-// receive the email (AllowedEmailDomains), the SipPulse AI key (live
-// transcription and meeting notes), and the TypeSafe key (Jev inline
-// classification). CaptureEnabled is policy-only: a kill switch the
-// collaborator cannot override.
+// No endpoint is built in: this is an open-source extension and each
+// organization points it at its own vCon store and providers.
+//
+// Fields:
+// - EndpointUrl + HmacSecret: the vCon store that receives the final vCon,
+//   signed with X-MeetVcon-Signature (HMAC-SHA256 of the body).
+// - AllowedEmailDomains: who may capture and receive the email.
+// - TranscriptionProvider ("deepgram" | "sippulse_ai") + TranscriptionUrl +
+//   TranscriptionApiKey: live transcription over the /v1/listen WebSocket.
+// - SipPulseAiUrl + SipPulseAiApiKey: meeting notes (OpenAI-compatible
+//   /v1/openai/chat/completions).
+// - TypeSafeUrl + TypeSafeApiKey: Jev inline classification (/v1/systemone).
+// - CaptureEnabled: policy-only kill switch the collaborator cannot override.
 
 (function (root) {
   const ns = (root.MeetVcon = root.MeetVcon || {});
   if (ns.config) return;
 
-  const API_ORIGIN = "https://api.sippulse.com";
-  // The streaming model is only deployed on the SipPulse AI dev (stage)
-  // environment for now; production is api.sippulse.ai. The key must belong
-  // to the same environment.
-  const SIPPULSE_AI_HOST = "api.dev.sippulse.ai";
-  // The model is multilingual (nemotron-asr derivative), but the dev gateway
-  // accepts only language=pt-BR|pt; switch to multilingual when it does.
-  const TRANSCRIPTION = Object.freeze({
-    provider: "sippulse_ai",
-    streamBase: `wss://${SIPPULSE_AI_HOST}`,
-    model: "pulse-stt-streaming-v1",
-    language: "pt-BR",
-    sampleRate: 8_000,
-    endpointing: 700,
-  });
+  // Streaming model choices per provider live in src/lib/transcription.js.
+  const TRANSCRIPTION_PROVIDERS = Object.freeze(["deepgram", "sippulse_ai"]);
   const ANALYSIS = Object.freeze({
     provider: "sippulse_ai",
-    apiBase: `https://${SIPPULSE_AI_HOST}/v1`,
     model: "deepseek-v4.1-flash",
     liveModel: "deepseek-v4.1-flash",
     liveIntervalMs: 60_000,
@@ -37,26 +31,28 @@
   // Per-utterance intent, sentiment, and action-item classification.
   const CLASSIFICATION = Object.freeze({
     provider: "typesafe",
-    apiBase: "https://api.typesafe.ai/v1",
     model: "jev-latest",
   });
   const DEFAULTS = Object.freeze({
-    endpointUrl: `${API_ORIGIN}/v1/meet-captures`,
-    bearerToken: "",
+    transcriptionProvider: "deepgram",
     captureEnabled: true,
     allowedEmailDomains: ["sippulse.com"],
-    sippulseAiApiKey: "",
-    typesafeApiKey: "",
   });
 
   const LOCAL_FIELDS = Object.freeze([
     "EndpointUrl",
-    "BearerToken",
+    "HmacSecret",
     "AllowedEmailDomains",
+    "TranscriptionProvider",
+    "TranscriptionUrl",
+    "TranscriptionApiKey",
+    "SipPulseAiUrl",
     "SipPulseAiApiKey",
+    "TypeSafeUrl",
     "TypeSafeApiKey",
   ]);
-  const SECRET_FIELDS = Object.freeze(["BearerToken", "SipPulseAiApiKey", "TypeSafeApiKey"]);
+  const SECRET_FIELDS = Object.freeze(["HmacSecret", "TranscriptionApiKey", "SipPulseAiApiKey", "TypeSafeApiKey"]);
+  const URL_FIELDS = Object.freeze(["EndpointUrl", "TranscriptionUrl", "SipPulseAiUrl", "TypeSafeUrl"]);
 
   const text = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -82,6 +78,33 @@
     return { raw, sources };
   }
 
+  // Configured URLs must be HTTPS without credentials; returns the parsed URL
+  // or null.
+  function httpsUrl(value) {
+    try {
+      const url = new URL(text(value));
+      return url.protocol === "https:" && !url.username && !url.password ? url : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // "https://host/base/" -> "https://host/base"
+  function base(url) {
+    return url.href.replace(/\/+$/, "");
+  }
+
+  // Origin patterns that need host permission: fetch from extension pages to
+  // servers without CORS. The transcription WebSocket needs none.
+  function originsFor(config) {
+    const origins = new Set();
+    for (const value of [config.endpointUrl, config.transcriptionUrl, config.sippulseAiUrl, config.typesafeUrl]) {
+      const url = httpsUrl(value);
+      if (url) origins.add(`${url.origin}/*`);
+    }
+    return [...origins];
+  }
+
   function normalizeDomains(value) {
     const domains = (Array.isArray(value) ? value : [])
       .filter((domain) => typeof domain === "string")
@@ -96,63 +119,55 @@
     return (config.allowedEmailDomains || DEFAULTS.allowedEmailDomains).includes(domain);
   }
 
-  function withProviders(config, raw) {
+  function normalize(raw = {}) {
+    const errors = {};
+    for (const field of URL_FIELDS) {
+      if (isSet(raw[field]) && !httpsUrl(raw[field])) errors[field] = `${field} must be an https:// URL`;
+    }
+    const provider = text(raw.TranscriptionProvider) || DEFAULTS.transcriptionProvider;
+    if (!TRANSCRIPTION_PROVIDERS.includes(provider)) {
+      errors.TranscriptionProvider = `TranscriptionProvider must be one of ${TRANSCRIPTION_PROVIDERS.join(", ")}`;
+    }
+    const stream = httpsUrl(raw.TranscriptionUrl);
+    const transcriptionApiKey = text(raw.TranscriptionApiKey);
+    const store = httpsUrl(raw.EndpointUrl);
+    const sippulse = httpsUrl(raw.SipPulseAiUrl);
+    const typesafe = httpsUrl(raw.TypeSafeUrl);
+    const hmacSecret = text(raw.HmacSecret);
     const sippulseAiApiKey = text(raw.SipPulseAiApiKey);
     const typesafeApiKey = text(raw.TypeSafeApiKey);
-    return {
-      ...config,
+    const configured = !!store && !!hmacSecret;
+
+    const config = {
+      endpointUrl: store ? store.href : "",
+      hmacSecret,
+      transcriptionUrl: stream ? base(stream) : "",
+      transcriptionApiKey,
+      sippulseAiUrl: sippulse ? base(sippulse) : "",
       sippulseAiApiKey,
+      typesafeUrl: typesafe ? base(typesafe) : "",
       typesafeApiKey,
-      liveTranscriptionReady: !!sippulseAiApiKey,
-      analysisReady: !!sippulseAiApiKey,
-      classificationReady: !!typesafeApiKey,
-      transcription: TRANSCRIPTION,
-      analysis: ANALYSIS,
-      classification: CLASSIFICATION,
-    };
-  }
-
-  function normalize(raw = {}) {
-    const hasEndpoint = text(raw.EndpointUrl) !== "";
-    const endpointUrl = hasEndpoint ? raw.EndpointUrl : DEFAULTS.endpointUrl;
-    const allowedEmailDomains = normalizeDomains(raw.AllowedEmailDomains);
-    let endpoint;
-    try {
-      endpoint = new URL(endpointUrl);
-    } catch {
-      return withProviders(
-        { ...DEFAULTS, allowedEmailDomains, configured: false, error: "The vCon storage endpoint is not a valid URL" },
-        raw
-      );
-    }
-
-    if (endpoint.origin !== API_ORIGIN || endpoint.protocol !== "https:") {
-      return withProviders(
-        {
-          ...DEFAULTS,
-          allowedEmailDomains,
-          configured: false,
-          error: "The vCon storage endpoint must be on https://api.sippulse.com",
-        },
-        raw
-      );
-    }
-
-    return withProviders(
-      {
-        endpointUrl: endpoint.href,
-        bearerToken: raw.BearerToken || "",
-        captureEnabled:
-          raw.CaptureEnabled === undefined ? DEFAULTS.captureEnabled : raw.CaptureEnabled === true,
-        allowedEmailDomains,
-        configured: hasEndpoint && !!raw.BearerToken,
-        error:
-          hasEndpoint && raw.BearerToken
-            ? ""
-            : "Configure the vCon storage endpoint and token in Google Admin or in Settings",
+      captureEnabled:
+        raw.CaptureEnabled === undefined ? DEFAULTS.captureEnabled : raw.CaptureEnabled === true,
+      allowedEmailDomains: normalizeDomains(raw.AllowedEmailDomains),
+      configured,
+      error:
+        errors.EndpointUrl ||
+        (configured ? "" : "Configure the vCon store endpoint and HMAC secret in Google Admin or in Settings"),
+      errors,
+      liveTranscriptionReady: !!stream && !!transcriptionApiKey && !errors.TranscriptionProvider,
+      analysisReady: !!sippulse && !!sippulseAiApiKey,
+      classificationReady: !!typesafe && !!typesafeApiKey,
+      transcription: {
+        provider,
+        apiBase: stream ? base(stream) : "",
+        streamBase: stream ? base(stream).replace(/^https:/, "wss:") : "",
       },
-      raw
-    );
+      analysis: { ...ANALYSIS, apiBase: sippulse ? `${base(sippulse)}/v1` : "" },
+      classification: { ...CLASSIFICATION, apiBase: typesafe ? `${base(typesafe)}/v1` : "" },
+    };
+    config.origins = originsFor(config);
+    return config;
   }
 
   async function readManaged() {
@@ -170,16 +185,16 @@
   }
 
   ns.config = {
-    API_ORIGIN,
-    SIPPULSE_AI_HOST,
     DEFAULTS,
-    TRANSCRIPTION,
+    TRANSCRIPTION_PROVIDERS,
     ANALYSIS,
     CLASSIFICATION,
     LOCAL_FIELDS,
     SECRET_FIELDS,
+    URL_FIELDS,
     merge,
     normalize,
+    originsFor,
     readManaged,
     get,
     isAllowedEmail,

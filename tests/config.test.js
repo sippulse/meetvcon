@@ -2,72 +2,69 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadLibrary } = require("./helpers");
 
-test("managed configuration fails closed without endpoint and auth", () => {
+test("nothing is built in: without configured endpoints every feature is off", () => {
   const { config } = loadLibrary("src/lib/config.js");
-  const result = config.normalize({});
+  const result = config.normalize({ HmacSecret: "s", SipPulseAiApiKey: "k", TypeSafeApiKey: "t" });
   assert.equal(result.configured, false);
+  assert.match(result.error, /vCon store endpoint/);
+  assert.equal(result.liveTranscriptionReady, false);
+  assert.equal(result.classificationReady, false);
+  assert.deepEqual([...result.origins], []);
+  assert.equal(JSON.stringify(result).includes("sippulse.ai"), false);
+  assert.equal(JSON.stringify(result).includes("typesafe.ai"), false);
 });
 
-test("managed configuration accepts only authenticated api.sippulse.com endpoints", () => {
+test("endpoints come from configuration, must be https, and derive the provider bases and host permissions", () => {
   const { config } = loadLibrary("src/lib/config.js");
   const result = config.normalize({
-    EndpointUrl: "https://api.sippulse.com/v1/meet-captures",
-    BearerToken: "managed-pilot-token",
+    EndpointUrl: "https://crm.example.com/api/vcons/ingest",
+    HmacSecret: "secret",
+    TranscriptionUrl: "https://stt.example.com/",
+    TranscriptionApiKey: "d",
+    SipPulseAiUrl: "https://llm.example.com",
+    SipPulseAiApiKey: "k",
+    TypeSafeUrl: "https://ts.example.com",
+    TypeSafeApiKey: "t",
   });
   assert.equal(result.configured, true);
+  assert.equal(result.transcription.provider, "deepgram", "provider type defaults to deepgram");
+  assert.equal(result.transcription.streamBase, "wss://stt.example.com");
+  assert.equal(result.transcription.apiBase, "https://stt.example.com");
+  assert.equal(result.analysis.apiBase, "https://llm.example.com/v1");
+  assert.equal(result.classification.apiBase, "https://ts.example.com/v1");
+  assert.deepEqual([...result.origins], [
+    "https://crm.example.com/*",
+    "https://stt.example.com/*",
+    "https://llm.example.com/*",
+    "https://ts.example.com/*",
+  ]);
 
-  const external = config.normalize({
-    EndpointUrl: "https://example.com/collect",
-    BearerToken: "token",
-  });
-  assert.equal(external.configured, false);
+  const insecure = config.normalize({ EndpointUrl: "http://crm.example.com/ingest", HmacSecret: "s", SipPulseAiUrl: "ftp://x" });
+  assert.equal(insecure.configured, false);
+  assert.match(insecure.errors.EndpointUrl, /https/);
+  assert.match(insecure.errors.SipPulseAiUrl, /https/);
+  assert.equal(config.normalize({ EndpointUrl: "https://user:pw@crm.example.com/x", HmacSecret: "s" }).configured, false);
 });
 
-test("collaborator domain defaults to sippulse.com and follows managed policy", () => {
+test("transcription and notes are configured independently; the provider type must be known", () => {
   const { config } = loadLibrary("src/lib/config.js");
-  const internal = config.normalize({});
-  assert.equal(config.isAllowedEmail("ana@sippulse.com", internal), true);
-  assert.equal(config.isAllowedEmail("ana@SipPulse.com", internal), true);
-  assert.equal(config.isAllowedEmail("ana@gmail.com", internal), false);
-  assert.equal(config.isAllowedEmail("evil@sippulse.com.attacker.io", internal), false);
+  const notesOnly = config.normalize({ SipPulseAiUrl: "https://api.sippulse.ai", SipPulseAiApiKey: "k" });
+  assert.equal(notesOnly.analysisReady, true);
+  assert.equal(notesOnly.liveTranscriptionReady, false);
 
-  const external = config.normalize({ AllowedEmailDomains: ["@Example.com", ""] });
-  assert.equal(config.isAllowedEmail("bob@example.com", external), true);
-  assert.equal(config.isAllowedEmail("ana@sippulse.com", external), false);
-  assert.deepEqual([...config.normalize({ AllowedEmailDomains: [] }).allowedEmailDomains], ["sippulse.com"]);
-});
-
-test("provider keys come from policy and gate live transcription, notes, and classification", () => {
-  const { config } = loadLibrary("src/lib/config.js");
-  const bare = config.normalize({
-    EndpointUrl: "https://api.sippulse.com/v1/meet-captures",
-    BearerToken: "managed-pilot-token",
+  const sippulseStream = config.normalize({
+    TranscriptionProvider: "sippulse_ai",
+    TranscriptionUrl: "https://api.dev.sippulse.ai",
+    TranscriptionApiKey: "k",
   });
-  assert.equal(bare.liveTranscriptionReady, false);
-  assert.equal(bare.analysisReady, false);
-  assert.equal(bare.classificationReady, false);
+  assert.equal(sippulseStream.liveTranscriptionReady, true);
+  assert.equal(sippulseStream.transcription.provider, "sippulse_ai");
 
-  const full = config.normalize({
-    EndpointUrl: "https://api.sippulse.com/v1/meet-captures",
-    BearerToken: "managed-pilot-token",
-    SipPulseAiApiKey: " sp-key ",
-    TypeSafeApiKey: "ts-key",
-  });
-  assert.equal(full.sippulseAiApiKey, "sp-key");
-  assert.equal(full.liveTranscriptionReady, true);
-  assert.equal(full.analysisReady, true);
-  assert.equal(full.classificationReady, true);
-  assert.equal(full.transcription.streamBase, "wss://api.dev.sippulse.ai");
-  assert.equal(full.transcription.model, "pulse-stt-streaming-v1");
-  assert.equal(full.transcription.sampleRate, 8000);
-  assert.equal(full.analysis.apiBase, "https://api.dev.sippulse.ai/v1");
-  assert.equal(full.analysis.model, "deepseek-v4.1-flash");
-  assert.equal(full.classification.model, "jev-latest");
-
-  // A rejected storage endpoint keeps the keys so the options page can report them.
-  const external = config.normalize({ EndpointUrl: "https://example.com", SipPulseAiApiKey: "sp" });
-  assert.equal(external.configured, false);
-  assert.equal(external.liveTranscriptionReady, true);
+  const unknown = config.normalize({ TranscriptionProvider: "whisper", TranscriptionUrl: "https://x.example.com", TranscriptionApiKey: "k" });
+  assert.equal(unknown.liveTranscriptionReady, false);
+  assert.match(unknown.errors.TranscriptionProvider, /deepgram, sippulse_ai/);
+  assert.equal(config.normalize({}).analysis.model, "deepseek-v4.1-flash");
+  assert.equal(config.normalize({}).classification.model, "jev-latest");
 });
 
 test("policy and local settings merge per field, policy first", () => {

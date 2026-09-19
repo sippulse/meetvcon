@@ -136,7 +136,8 @@ a {
   margin-left: 6px;
 }
 
-.field input {
+.field input,
+.field select {
   border: 1px solid #aab4bd;
   border-radius: 6px;
   box-sizing: border-box;
@@ -145,7 +146,8 @@ a {
   width: 100%;
 }
 
-.field input:disabled {
+.field input:disabled,
+.field select:disabled {
   background: #f0f3f5;
   color: #65717d;
 }
