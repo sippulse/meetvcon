@@ -3,13 +3,16 @@
 // (tests/worker-core.test.js) without a browser.
 
 export const STALE_MEETING_MS = 10 * 60_000;
-export const UPLOAD_GRACE_MS = 15 * 60_000;
+// The offscreen document flushes the live streams and runs the final analysis after
+// the call; give it this long to report before falling back.
+export const FINALIZE_GRACE_MS = 15 * 60_000;
 export const DISCARD_TTL_MS = 4 * 60 * 60_000;
 export const FETCH_TIMEOUT_MS = 30_000;
 export const OFFSCREEN_PATH = "src/offscreen/offscreen.html";
 export const RECOVERY_ALARM = "recovery-scan";
 export const OFFSCREEN_CLEANUP_ALARM = "offscreen-cleanup";
 export const LAST_TRANSCRIPT_ID = "last-transcript";
+export const LOCAL_SETTINGS_ID = "local-settings";
 
 const ACTIVE_INDEX_KEY = "activeMeetingIndex";
 const AI_SESSIONS_KEY = "aiSessions";
@@ -25,13 +28,16 @@ export const MESSAGE_TYPES = new Set([
   "call_left",
   "capture_cancelled",
   "start_ai_capture",
-  "ai_upload_result",
+  "ai_session_result",
+  "live_update",
   "retry_queue_item",
   "discard_queue_item",
   "get_queue_item_document",
   "get_last_transcript",
   "test_connection",
   "get_popup_state",
+  "get_settings",
+  "save_settings",
 ]);
 
 const retryAlarmName = (id) => `retry:${id}`;
@@ -44,7 +50,7 @@ export function createWorkerCore({
   now = () => Date.now(),
   version = "0.0.0",
 }) {
-  const { log, storage, vcon, retryPolicy, config: configLib } = lib;
+  const { log, storage, vcon, retryPolicy, config: configLib, transcription, analysis, classification } = lib;
   const local = chrome.storage.local;
   const sessionArea = chrome.storage.session || chrome.storage.local;
   const finalizationTasks = new Map();
@@ -53,8 +59,13 @@ export function createWorkerCore({
   const iso = (ms = now()) => new Date(ms).toISOString();
   const IDENTITY_ERROR = "Sign in to Chrome with your company account";
 
+  // Policy (admin.google.com) merged with the encrypted local settings.
+  async function getConfig() {
+    return storage.getConfig(await readLocalSettings());
+  }
+
   async function isAuthorizedEmail(email) {
-    return configLib.isAllowedEmail(email, await storage.getConfig());
+    return configLib.isAllowedEmail(email, await getConfig());
   }
 
   async function readMap(area, key) {
@@ -80,9 +91,14 @@ export function createWorkerCore({
     const session = await getAiSession(record.meetingId);
     await storage.setDeliveryStatus({
       state: "capturing",
-      source: session ? "sippulse_ai" : "google_captions",
+      source: session ? "sippulse_ai_live" : "google_captions",
       error: "",
     });
+    // Caption speaker names let the recorder label remote voices in its
+    // live notes. Best effort: the final stop message carries them again.
+    if (session?.state === "recording" && record.utterances?.length) {
+      offscreenRequest({ type: "ai_captions", meetingId: record.meetingId, captions: record.utterances });
+    }
   }
 
   async function getActiveMeeting(meetingId) {
@@ -133,7 +149,7 @@ export function createWorkerCore({
     await writeMap(sessionArea, DISCARDED_KEY, markers);
   }
 
-  // ---- SipPulse AI sessions ----------------------------------------------
+  // ---- live transcription sessions ----------------------------------------
 
   async function getAiSession(meetingId) {
     const sessions = await readMap(local, AI_SESSIONS_KEY);
@@ -154,12 +170,25 @@ export function createWorkerCore({
     await closeOffscreenIfIdle();
   }
 
-  async function notifyTab(tabId, meetingId, active) {
+  async function sendToTab(tabId, message) {
     try {
-      await chrome.tabs.sendMessage(tabId, { type: "ai_capture_state", meetingId, active });
+      await chrome.tabs.sendMessage(tabId, message);
     } catch {
       // The Meet tab may already be closed.
     }
+  }
+
+  function notifyTab(tabId, meetingId, active, extra = {}) {
+    return sendToTab(tabId, { type: "ai_capture_state", meetingId, active, ...extra });
+  }
+
+  // The offscreen document cannot message tabs; relay its live transcript
+  // and notes to the Meet tab that owns the session.
+  async function relayLiveUpdate(meetingId, update) {
+    const session = await getAiSession(meetingId);
+    if (!session?.tabId || session.state !== "recording") return { ok: false, error: "No live session" };
+    await sendToTab(session.tabId, { type: "live_update", meetingId, update });
+    return { ok: true };
   }
 
   async function ensureOffscreenDocument() {
@@ -171,7 +200,7 @@ export function createWorkerCore({
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_PATH,
       reasons: ["USER_MEDIA"],
-      justification: "Record a user-approved Meet call for SipPulse AI transcription",
+      justification: "Stream a user-approved Meet call to live transcription",
     });
   }
 
@@ -201,9 +230,12 @@ export function createWorkerCore({
     const record = await getActiveMeeting(meetingId);
     if (!record) return { ok: false, error: "Capture has not started in this meeting yet" };
     if (await getAiSession(meetingId)) return { ok: true, alreadyActive: true };
-    const config = await storage.getConfig();
+    const config = await getConfig();
     if (!config.configured || !config.captureEnabled) {
       return { ok: false, error: config.error || "Capture is disabled by SipPulse" };
+    }
+    if (!config.liveTranscriptionReady) {
+      return { ok: false, error: "Live transcription is not configured by SipPulse" };
     }
     const profile = await getProfileUser();
     if (!(await isAuthorizedEmail(profile?.email))) {
@@ -217,7 +249,22 @@ export function createWorkerCore({
       return { ok: false, error: `Tab audio unavailable: ${error.message || error}` };
     }
     await ensureOffscreenDocument();
-    const result = await offscreenRequest({ type: "ai_capture_start", streamId, meetingId });
+    const result = await offscreenRequest({
+      type: "ai_capture_start",
+      streamId,
+      meetingId,
+      subject: record.subject || "",
+      meetingStartedAt: record.startedAt,
+      collaborator: profile,
+      captions: record.utterances || [],
+      config: {
+        sippulseAiApiKey: config.sippulseAiApiKey,
+        typesafeApiKey: config.typesafeApiKey,
+        transcription: config.transcription,
+        analysis: config.analysis,
+        classification: config.classification,
+      },
+    });
     if (!result?.ok) {
       await closeOffscreenIfIdle();
       return {
@@ -226,10 +273,15 @@ export function createWorkerCore({
         code: result?.code || null,
       };
     }
-    await setAiSession(meetingId, { state: "recording", startedAt: iso(), tabId });
+    const streamStartedAt = result.streamStartedAt || iso();
+    await setAiSession(meetingId, { state: "recording", startedAt: iso(), streamStartedAt, tabId });
     await chrome.alarms.clear(OFFSCREEN_CLEANUP_ALARM);
-    await storage.setDeliveryStatus({ state: "capturing", source: "sippulse_ai", error: "" });
-    await notifyTab(tabId, meetingId, true);
+    await storage.setDeliveryStatus({ state: "capturing", source: "sippulse_ai_live", error: "" });
+    await notifyTab(tabId, meetingId, true, {
+      streamStartedAt,
+      analysisEnabled: config.analysisReady,
+      classificationEnabled: config.classificationReady,
+    });
     return { ok: true };
   }
 
@@ -260,14 +312,14 @@ export function createWorkerCore({
     if (!meetingId) return { ok: false, error: "Missing meeting id" };
     const record = await getActiveMeeting(meetingId);
     if (!record) return { ok: false, error: "Meeting record not found" };
-    const config = await storage.getConfig();
+    const config = await getConfig();
     if (!config.captureEnabled) {
       await cancelMeeting(meetingId);
       return { ok: false, error: "Capture was disabled by SipPulse" };
     }
     const session = await getAiSession(meetingId);
-    if (session?.state === "uploading") {
-      return { ok: true, pending: true, source: "sippulse_ai" };
+    if (session?.state === "finalizing") {
+      return { ok: true, pending: true, source: "sippulse_ai_live" };
     }
     const profile = await requireProfile();
     if (!profile) return { ok: false, error: "Collaborator email unavailable" };
@@ -278,7 +330,7 @@ export function createWorkerCore({
       session ? "google_captions_fallback" : "google_captions",
       profile
     );
-    if (record.utterances?.length) await saveLastTranscript(fallback, record, !!session);
+    if (record.utterances?.length) await saveLastTranscript(fallback, record);
 
     if (session) {
       if (!config.configured) {
@@ -287,25 +339,110 @@ export function createWorkerCore({
         const response = await offscreenRequest({
           type: "ai_capture_stop",
           meetingId,
-          endpointUrl: config.endpointUrl,
-          bearerToken: config.bearerToken,
-          vcon: fallback,
-          deliveryKind,
+          subject: record.subject || "",
+          collaborator: profile,
+          captions: record.utterances || [],
         });
         if (response?.ok) {
           await setAiSession(meetingId, {
             ...session,
-            state: "uploading",
+            state: "finalizing",
             deliveryKind,
-            uploadStartedAt: iso(),
+            finalizeStartedAt: iso(),
           });
-          await storage.setDeliveryStatus({ state: "uploading", source: "sippulse_ai", error: "" });
-          return { ok: true, pending: true, source: "sippulse_ai" };
+          await storage.setDeliveryStatus({ state: "finalizing", source: "sippulse_ai_live", error: "" });
+          return { ok: true, pending: true, source: "sippulse_ai_live" };
         }
-        log.warn("SipPulse AI recorder unavailable; sending Google captions", response?.error);
+        log.warn("live recorder unavailable; using the transcript saved during the call", response?.error);
         await clearAiSession(meetingId, session);
+        return deliverFallback(record, meetingId, deliveryKind, profile, session);
       }
     }
+    return deliverCaptions(record, fallback, meetingId, deliveryKind);
+  }
+
+  function liveVcon(record, deliveryKind, profile, live, transcriptionSource) {
+    const utterances = live.utterances || [];
+    const stats = live.stats || transcription.speakerStats(utterances);
+    return vcon.assemble(
+      { ...record, utterances },
+      {
+        capturedBy: `SipPulse Meet Capture/${version}`,
+        deliveryKind,
+        transcriptionSource,
+        transcription: {
+          provider: live.transcription?.provider || "sippulse_ai",
+          model: live.transcription?.model || null,
+          language: live.transcription?.language || null,
+          stream_started_at: live.streamStartedAt || null,
+        },
+        analysis: [
+          ...analysis.toVconAnalysis({
+            analysis: live.analysis,
+            model: live.analysisModel,
+            stats,
+            dialogCount: utterances.length,
+            generatedAt: iso(),
+          }),
+          ...classification.toVconAnalysis({
+            utterances,
+            classifications: live.classifications,
+            model: live.classificationModel,
+          }),
+        ],
+        analysisError: live.analysisError || "",
+        capturedByUser: profile,
+      }
+    );
+  }
+
+  async function deliverLive(record, meetingId, deliveryKind, profile, live, transcriptionSource) {
+    const document = liveVcon(record, deliveryKind, profile, live, transcriptionSource);
+    await saveLastTranscript(document, { ...record, utterances: live.utterances });
+    const result = await deliverVcon(document, deliveryKind);
+    await removeActiveMeeting(meetingId);
+    return result;
+  }
+
+  // The recorder could not report: rebuild the transcript from the live
+  // segments the Meet tab saved during the call, else use Google captions.
+  async function deliverFallback(record, meetingId, deliveryKind, profile, session) {
+    const streamStartedAt = record.liveStreamStartedAt || session?.streamStartedAt;
+    const utterances = record.liveSegments?.length
+      ? transcription.toUtterances(record.liveSegments, {
+          streamStartedAt,
+          captions: record.utterances || [],
+          collaborator: profile,
+        })
+      : [];
+    if (utterances.length) {
+      const config = await getConfig();
+      const classifications = record.liveClassifications || {};
+      const summary = Object.keys(classifications).length
+        ? classification.summarize(utterances, classifications, {
+            meetingStartedAt: record.startedAt,
+            clock: transcription.clock,
+          })
+        : null;
+      return deliverLive(
+        record,
+        meetingId,
+        deliveryKind,
+        profile,
+        {
+          utterances,
+          streamStartedAt,
+          transcription: config.transcription,
+          analysis: analysis.withClassification(record.liveAnalysis || null, summary),
+          analysisModel: config.analysis.liveModel,
+          classifications,
+          classificationModel: config.classification.model,
+          analysisError: record.liveAnalysis ? "Final report unavailable; live notes attached" : "",
+        },
+        "sippulse_ai_live_recovered"
+      );
+    }
+    const fallback = assembleVcon(record, deliveryKind, "google_captions_fallback", profile);
     return deliverCaptions(record, fallback, meetingId, deliveryKind);
   }
 
@@ -323,35 +460,25 @@ export function createWorkerCore({
     return result;
   }
 
-  // Reported by the offscreen document when its upload finishes, so the
-  // service worker never has to stay alive across a multi-minute upload.
-  async function completeAiUpload(meetingId, result) {
+  // Reported by the offscreen document once the streams have flushed and the
+  // final analysis has run, so the worker never stays alive across either.
+  async function completeAiSession(meetingId, result) {
     const session = await getAiSession(meetingId);
     if (!session) {
-      log.warn("upload result for unknown SipPulse AI session", meetingId);
-      return { ok: false, error: "No matching SipPulse AI session" };
+      log.warn("result for unknown live session", meetingId);
+      return { ok: false, error: "No matching live session" };
     }
     const deliveryKind = session.deliveryKind || "final";
     await clearAiSession(meetingId, session);
     const record = await getActiveMeeting(meetingId);
-    if (result?.ok) {
-      await removeQueuedForMeeting(record?.uuid || result.uuid);
-      await removeActiveMeeting(meetingId);
-      await storage.setDeliveryStatus({
-        state: "processing",
-        source: "sippulse_ai",
-        requestId: result.requestId || null,
-        lastSuccessAt: iso(),
-        error: "",
-      });
-      return { ok: true };
-    }
-    log.warn("SipPulse AI upload failed; sending Google captions", result?.error);
     if (!record) return { ok: false, error: "Meeting record not found" };
     const profile = await requireProfile();
     if (!profile) return { ok: false, error: "Collaborator email unavailable" };
-    const fallback = assembleVcon(record, deliveryKind, "google_captions_fallback", profile);
-    return deliverCaptions(record, fallback, meetingId, deliveryKind);
+    if (result?.ok && result.utterances?.length) {
+      return deliverLive(record, meetingId, deliveryKind, profile, result, "sippulse_ai_live");
+    }
+    log.warn("live transcript unavailable; falling back", result?.error);
+    return deliverFallback(record, meetingId, deliveryKind, profile, session);
   }
 
   async function cancelMeeting(meetingId) {
@@ -374,7 +501,7 @@ export function createWorkerCore({
 
   // ---- local escape hatch: last captured transcript ----------------------
 
-  async function saveLastTranscript(document, record, audioAlsoRecorded) {
+  async function saveLastTranscript(document, record) {
     await secureStore.put(LAST_TRANSCRIPT_ID, { document, savedAt: iso() });
     await local.set({
       [LAST_TRANSCRIPT_META_KEY]: {
@@ -382,8 +509,8 @@ export function createWorkerCore({
         subject: record.subject || record.meetingId || "",
         savedAt: iso(),
         utteranceCount: record.utterances?.length || 0,
-        captionsOnly: true,
-        audioAlsoRecorded: !!audioAlsoRecorded,
+        source: document.attachments?.[0]?.body?.transcription_source || "google_captions",
+        hasReport: (document.analysis || []).some((entry) => entry.type === "meeting_insights"),
       },
     });
   }
@@ -402,7 +529,7 @@ export function createWorkerCore({
   // ---- delivery and retry queue -----------------------------------------
 
   async function deliverVcon(vconDocument, deliveryKind) {
-    const config = await storage.getConfig();
+    const config = await getConfig();
     const result = await postVcon(vconDocument, config.endpointUrl, config.bearerToken, deliveryKind);
     if (result.ok) {
       await removeQueuedForMeeting(vconDocument.uuid);
@@ -481,7 +608,7 @@ export function createWorkerCore({
       return { ok: false, error: "Encrypted payload not found" };
     }
 
-    const config = await storage.getConfig();
+    const config = await getConfig();
     const result = await postVcon(payload.document, payload.endpointUrl, config.bearerToken, item.deliveryKind);
     if (result.ok) {
       await secureStore.remove(`queue:${id}`);
@@ -556,10 +683,10 @@ export function createWorkerCore({
     const index = await readMap(local, ACTIVE_INDEX_KEY);
     for (const [meetingId, metadata] of Object.entries(index)) {
       const session = await getAiSession(meetingId);
-      if (session?.state === "uploading") {
-        if (now() - Date.parse(session.uploadStartedAt) < UPLOAD_GRACE_MS) continue;
-        log.warn("SipPulse AI upload never reported back; using Google captions", meetingId);
-        await completeAiUpload(meetingId, { ok: false, error: "Audio upload did not complete" });
+      if (session?.state === "finalizing") {
+        if (now() - Date.parse(session.finalizeStartedAt) < FINALIZE_GRACE_MS) continue;
+        log.warn("live recorder never reported back; using the saved transcript", meetingId);
+        await completeAiSession(meetingId, { ok: false, error: "Live transcript did not complete" });
         continue;
       }
       if (now() - Date.parse(metadata.updatedAt) < STALE_MEETING_MS) continue;
@@ -575,13 +702,79 @@ export function createWorkerCore({
     }
   }
 
+  // ---- local settings (options page) --------------------------------------
+
+  async function readLocalSettings() {
+    return (await secureStore.get(LOCAL_SETTINGS_ID))?.settings || {};
+  }
+
+  function mask(value) {
+    const secret = String(value || "");
+    return secret ? `••••${secret.slice(-4)}` : "";
+  }
+
+  // Secrets never leave the worker; the page sees only whether one is set.
+  async function getSettings() {
+    const [local, managed] = await Promise.all([readLocalSettings(), configLib.readManaged()]);
+    const { sources } = configLib.merge(managed, local);
+    const fields = {};
+    for (const field of configLib.LOCAL_FIELDS) {
+      const secret = configLib.SECRET_FIELDS.includes(field);
+      const value = sources[field] === "policy" ? managed[field] : local[field];
+      fields[field] = {
+        source: sources[field],
+        locked: sources[field] === "policy",
+        value: secret ? mask(value) : value ?? "",
+        localValue: secret ? mask(local[field]) : local[field] ?? "",
+      };
+    }
+    return { ok: true, fields };
+  }
+
+  // settings: new values (empty secret = keep); remove: fields to clear.
+  async function saveSettings({ settings = {}, remove = [] }) {
+    const managed = await configLib.readManaged();
+    const next = { ...(await readLocalSettings()) };
+    for (const field of configLib.LOCAL_FIELDS) {
+      if (configLib.merge(managed, {}).sources[field] === "policy") continue;
+      if (remove.includes(field)) {
+        delete next[field];
+        continue;
+      }
+      if (!(field in settings)) continue;
+      const value = settings[field];
+      if (field === "AllowedEmailDomains") {
+        const domains = (Array.isArray(value) ? value : String(value || "").split(/[\s,;]+/))
+          .map((domain) => domain.trim())
+          .filter(Boolean);
+        if (domains.length) next[field] = domains;
+        else delete next[field];
+      } else if (typeof value === "string" && value.trim()) {
+        next[field] = value.trim();
+      } else if (!configLib.SECRET_FIELDS.includes(field)) {
+        delete next[field];
+      }
+    }
+    if (next.EndpointUrl) {
+      const checked = configLib.normalize({ EndpointUrl: next.EndpointUrl, BearerToken: "check" });
+      if (!checked.configured) return { ok: false, error: checked.error };
+    }
+    await secureStore.put(LOCAL_SETTINGS_ID, { settings: next, savedAt: iso() });
+    profileCache = undefined;
+    return getSettings();
+  }
+
+  function fromOptionsPage(sender) {
+    return !!sender?.url?.startsWith(chrome.runtime.getURL("src/options/"));
+  }
+
   // ---- popup / options ---------------------------------------------------
 
   async function getPopupState() {
     const [consent, config, status, queue, activeMeetings, aiSessions, discarded, lastMeta, profile] =
       await Promise.all([
         storage.getConsent(),
-        storage.getConfig(),
+        getConfig(),
         storage.getDeliveryStatus(),
         storage.getQueue(),
         readMap(local, ACTIVE_INDEX_KEY),
@@ -596,13 +789,20 @@ export function createWorkerCore({
       config: {
         configured: config.configured,
         captureEnabled: config.captureEnabled,
-        preferredTranscription: config.preferredTranscription,
+        liveTranscriptionReady: config.liveTranscriptionReady,
+        analysisReady: config.analysisReady,
+        classificationReady: config.classificationReady,
         error: config.error,
       },
       status,
       queue,
       activeMeetingIds: Object.keys(activeMeetings),
       aiMeetingIds: Object.keys(aiSessions).filter((id) => aiSessions[id].state === "recording"),
+      liveSessions: Object.fromEntries(
+        Object.entries(aiSessions)
+          .filter(([, session]) => session.state === "recording")
+          .map(([id, session]) => [id, { streamStartedAt: session.streamStartedAt || null }])
+      ),
       discardedMeetingIds: Object.keys(discarded),
       lastTranscript: lastMeta[LAST_TRANSCRIPT_META_KEY] || null,
       collaboratorEmail: profile?.email || "",
@@ -630,8 +830,16 @@ export function createWorkerCore({
       "google_captions",
       profile
     );
-    const config = await storage.getConfig();
-    return postVcon(document, config.endpointUrl, config.bearerToken, "test");
+    const config = await getConfig();
+    const [storageResult, sippulseAiResult, typesafeResult] = await Promise.all([
+      postVcon(document, config.endpointUrl, config.bearerToken, "test"),
+      analysis.checkKey(fetch, config.analysis.apiBase, config.sippulseAiApiKey),
+      classification.checkKey(fetch, config.classification.apiBase, config.typesafeApiKey),
+    ]);
+    return {
+      ...storageResult,
+      services: { storage: storageResult, sippulseAi: sippulseAiResult, typesafe: typesafeResult },
+    };
   }
 
   async function getProfileUser() {
@@ -682,7 +890,7 @@ export function createWorkerCore({
     return null;
   }
 
-  async function handleMessage(message) {
+  async function handleMessage(message, sender) {
     switch (message?.type) {
       case "active_meeting_get":
         return { ok: true, record: await getActiveMeeting(message.meetingId) };
@@ -704,8 +912,10 @@ export function createWorkerCore({
         return { ok: true };
       case "start_ai_capture":
         return startAiCapture(message.meetingId, message.tabId);
-      case "ai_upload_result":
-        return completeAiUpload(message.meetingId, message.result);
+      case "ai_session_result":
+        return completeAiSession(message.meetingId, message.result);
+      case "live_update":
+        return relayLiveUpdate(message.meetingId, message.update);
       case "retry_queue_item":
         return retryQueueItem(message.id, true);
       case "discard_queue_item":
@@ -719,6 +929,10 @@ export function createWorkerCore({
         return handleTestConnection();
       case "get_popup_state":
         return getPopupState();
+      case "get_settings":
+        return fromOptionsPage(sender) ? getSettings() : { ok: false, error: "Not allowed" };
+      case "save_settings":
+        return fromOptionsPage(sender) ? saveSettings(message) : { ok: false, error: "Not allowed" };
       default:
         return { ok: false, error: `Unknown message ${message?.type}` };
     }

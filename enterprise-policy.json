@@ -2,36 +2,37 @@
   "type": "object",
   "properties": {
     "EndpointUrl": {
-      "title": "SipPulse transcript ingestion endpoint",
-      "description": "HTTPS URL on api.sippulse.com that receives vCon payloads.",
+      "title": "SipPulse vCon storage endpoint",
+      "description": "HTTPS URL on api.sippulse.com that stores the final vCon in CRM and emails the transcript.",
       "type": "string"
     },
     "BearerToken": {
-      "title": "Temporary ingestion bearer token",
+      "title": "Temporary vCon storage bearer token",
       "description": "Optional pilot credential. Prefer SipPulse SSO for production.",
       "type": "string"
     },
-    "CaptureEnabled": {
-      "title": "Enable meeting capture",
-      "description": "Allows employees to capture Google Meet captions after consent.",
-      "type": "boolean"
-    },
-    "PreferredTranscription": {
-      "title": "Preferred transcription source",
-      "description": "SipPulse AI requires one user click per meeting; Google captions remain the fallback.",
-      "type": "string",
-      "enum": [
-        "sippulse_ai",
-        "google_captions"
-      ]
-    },
     "AllowedEmailDomains": {
       "title": "Allowed collaborator email domains",
-      "description": "Chrome profile email domains allowed to capture. Defaults to sippulse.com.",
+      "description": "Chrome profile email domains allowed to capture and receive the transcript email. Defaults to sippulse.com.",
       "type": "array",
       "items": {
         "type": "string"
       }
+    },
+    "SipPulseAiApiKey": {
+      "title": "SipPulse AI API key (pilot)",
+      "description": "Enables live transcription (pulse-stt-streaming-v1) and meeting notes/report. Must be a key for the SipPulse AI dev environment (api.dev.sippulse.ai). Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "type": "string"
+    },
+    "TypeSafeApiKey": {
+      "title": "TypeSafe API key (pilot)",
+      "description": "Enables inline per-utterance classification (intent, sentiment, action items) with the Jev model. Readable on every enrolled machine: use a dedicated, rotatable key.",
+      "type": "string"
+    },
+    "CaptureEnabled": {
+      "title": "Enable meeting capture",
+      "description": "Optional kill switch. Defaults to enabled.",
+      "type": "boolean"
     }
   }
 }

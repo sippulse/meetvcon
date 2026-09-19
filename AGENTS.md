@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-This is a build-free Chrome Manifest V3 extension for internal SipPulse use. `manifest.json` is the runtime entry point. Shared browser utilities live in `src/lib/`; Google Meet detection, caption fallback, and the in-call panel are in `src/content/`. The service worker owns encrypted recovery, delivery, and retries in `src/background/`: put behavior in `worker-core.mjs` (dependency-injected, unit tested) and keep `service-worker.js` as wiring only. `src/offscreen/` records tab and microphone audio and reports upload results back as `ai_upload_result`; `src/permissions/` holds the one-time microphone grant page. User interfaces live in `src/options/` and `src/popup/`. Tests mirror library concerns under `tests/`; store assets and their generator are in `screenshots/` and `tools/`.
+This is a build-free Chrome Manifest V3 extension for internal SipPulse use. `manifest.json` is the runtime entry point. Shared browser utilities live in `src/lib/`; Google Meet detection, caption fallback, and the in-call panel are in `src/content/`. The service worker owns encrypted recovery, delivery, and retries in `src/background/`: put behavior in `worker-core.mjs` (dependency-injected, unit tested) and keep `service-worker.js` as wiring only. `src/offscreen/` streams tab and microphone audio to the SipPulse AI gateway, classifies each line with TypeSafe Jev, runs SipPulse AI analysis, relays live transcript/tags/notes as `live_update`, and reports the final transcript and report as `ai_session_result`; provider logic that can be pure lives in `src/lib/transcription.js`, `src/lib/classification.js`, and `src/lib/analysis.js`; `src/permissions/` holds the one-time microphone grant page. User interfaces live in `src/options/` and `src/popup/`. Tests mirror library concerns under `tests/`; store assets and their generator are in `screenshots/` and `tools/`.
 
-Read `PRD.md` before changing product behavior. Read `docs/INTERNAL_INGESTION.md` when changing the upload, CRM vCon, email, or SipPulse AI contract.
+Read `PRD.md` before changing product behavior. Read `docs/INTERNAL_INGESTION.md` when changing the vCon, `analysis[]` shape, CRM, email, SipPulse AI, or TypeSafe contract.
 
 ## Build, Test, and Development Commands
 
@@ -15,7 +15,7 @@ There is no compile step; Chromium loads the repository root directly.
 - `npm run check` syntax-checks JavaScript in `src/`, `tools/`, and `tests/`.
 - `npm run screenshots` launches Chromium and regenerates the three store images.
 
-For local development, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this repository. Use the managed-policy example in `INSTALL.md`; capture fails closed without it.
+For local development, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this repository. Configure it from the options page Settings card (or Google Admin policy, see `INSTALL.md`); capture fails closed until the vCon endpoint and token are set.
 
 ## Coding Style & Naming Conventions
 
@@ -23,7 +23,7 @@ Use plain JavaScript with two-space indentation, semicolons, double-quoted strin
 
 ## Testing Guidelines
 
-Name tests after their module, such as `tests/vcon.test.js`. Add focused tests for parsing, configuration, vCon shaping, and retry-state changes. Delivery, discard, recovery, and AI-session changes belong in `tests/worker-core.test.js` using `tests/fake-chrome.js`; do not add service-worker behavior without a test there. Before opening a PR, run `npm test`, `npm run check`, and a Chromium smoke test. Changes to capture or delivery also require a real Meet test against staging.
+Name tests after their module, such as `tests/vcon.test.js`. Add focused tests for parsing, configuration, vCon shaping, streaming result handling (`tests/transcription.test.js`), Jev questions and aggregation (`tests/classification.test.js`), analysis prompts and output coercion (`tests/analysis.test.js`), and retry-state changes. Delivery, discard, recovery, and AI-session changes belong in `tests/worker-core.test.js` using `tests/fake-chrome.js`; do not add service-worker behavior without a test there. Before opening a PR, run `npm test`, `npm run check`, `npm run e2e:live` (real SipPulse AI dev and TypeSafe; keys from `.env`), and a Chromium smoke test. Changes to capture or delivery also require a real Meet test against staging.
 
 ## Commit & Pull Request Guidelines
 
@@ -31,4 +31,4 @@ History uses concise imperative subjects, sometimes prefixed with `Fix:`. Keep c
 
 ## Security & Configuration
 
-Keep API keys server-side. Never commit managed bearer tokens, transcripts, audio, `.env` files, or browser profiles. Preserve the fixed SipPulse API origin and narrowly scoped Chrome permissions; explain permission changes in the PR.
+Keep API keys out of the repository. Settings come from Google Admin policy (`chrome.storage.managed`, preferred, locks the field) or from the options page's local settings, which the worker stores encrypted and never returns unmasked; keep that precedence in `config.merge` and only accept `save_settings` from the options page. `.env` is for `npm run e2e:live` and is git-ignored. Never commit managed bearer tokens, provider keys, transcripts, audio, `.env` files, or browser profiles. Preserve the fixed destinations (`api.sippulse.com`, `api.dev.sippulse.ai`, `api.typesafe.ai`) and narrowly scoped Chrome permissions; explain permission changes in the PR.

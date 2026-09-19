@@ -29,7 +29,22 @@
     utteranceById: new Map(),
     nextId: 1,
     meeting: null, // { uuid, meetingId, meetingUrl, subject, startedAt }
+    // Live transcript relayed from the offscreen recorder. Kept in
+    // the encrypted record so recovery can deliver it if the recorder dies.
+    live: emptyLive(),
   };
+
+  function emptyLive() {
+    return {
+      streamStartedAt: null,
+      segments: [],
+      classifications: {},
+      interim: {},
+      analysis: null,
+      analysisAt: null,
+      status: null,
+    };
+  }
 
   async function workerRequest(type, payload = {}) {
     const response = await chrome.runtime.sendMessage({ type, ...payload });
@@ -111,6 +126,13 @@
       utterances,
       captionsEnabled: !!selectors.areCaptionsActive(),
     };
+    if (state.live.streamStartedAt) {
+      record.liveStreamStartedAt = state.live.streamStartedAt;
+      record.liveSegments = state.live.segments;
+      record.liveClassifications = state.live.classifications;
+      record.liveAnalysis = state.live.analysis;
+      record.liveAnalysisAt = state.live.analysisAt;
+    }
     try {
       await workerRequest("active_meeting_put", { record });
     } catch (err) {
@@ -123,6 +145,54 @@
     state.utteranceIds = [];
     state.utteranceById = new Map();
     state.nextId = 1;
+    state.live = emptyLive();
+  }
+
+  const listeners = new Set();
+
+  function notifyLive() {
+    for (const fn of listeners) {
+      try {
+        fn();
+      } catch (err) {
+        log.error("live listener threw", err);
+      }
+    }
+  }
+
+  function startLive(streamStartedAt) {
+    if (!streamStartedAt || state.live.streamStartedAt === streamStartedAt) return;
+    // A new recorder session restarts the transcription timeline.
+    if (state.live.streamStartedAt) state.live = emptyLive();
+    state.live.streamStartedAt = streamStartedAt;
+    notifyLive();
+  }
+
+  function applyLiveUpdate(update) {
+    if (!update || !state.meeting) return;
+    const live = state.live;
+    if (update.kind === "segment" && update.segment) {
+      const index = live.segments.findIndex((segment) => segment.id === update.segment.id);
+      if (index === -1) live.segments.push(update.segment);
+      else live.segments[index] = update.segment;
+    } else if (update.kind === "classification" && update.classification) {
+      live.classifications[update.id] = update.classification;
+    } else if (update.kind === "interim") {
+      live.interim[update.channel] = update.text || "";
+    } else if (update.kind === "analysis" && update.analysis) {
+      live.analysis = update.analysis;
+      live.analysisAt = update.at || new Date().toISOString();
+    } else if (update.kind === "transcription_status" || update.kind === "analysis_status") {
+      live.status = { ...(live.status || {}), [update.kind]: update };
+    } else {
+      return;
+    }
+    notifyLive();
+  }
+
+  function onLiveChange(fn) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
   }
 
   function onMutation(mutations) {
@@ -216,6 +286,13 @@
         state.utteranceById.set(id, rec);
         state.utteranceIds.push(id);
       }
+      if (existing.liveStreamStartedAt) {
+        state.live.streamStartedAt = existing.liveStreamStartedAt;
+        state.live.segments = existing.liveSegments || [];
+        state.live.classifications = existing.liveClassifications || {};
+        state.live.analysis = existing.liveAnalysis || null;
+        state.live.analysisAt = existing.liveAnalysisAt || null;
+      }
       log.info("rehydrated", existing.utterances?.length || 0, "utterances");
     }
     log.info("meeting started", state.meeting.meetingId, "uuid", state.meeting.uuid);
@@ -287,6 +364,11 @@
     endMeeting,
     cancelMeeting,
     getUtteranceCount: () => state.utteranceIds.length,
+    getCaptionUtterances: snapshotUtterances,
+    getLive: () => state.live,
+    startLive,
+    applyLiveUpdate,
+    onLiveChange,
     getMeeting: () => state.meeting,
     meetingIdFromUrl,
   };

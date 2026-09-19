@@ -1,26 +1,40 @@
 .meetvcon-panel {
   position: fixed;
-  bottom: 16px;
+  bottom: 88px;
   right: 16px;
   z-index: 2147483647;
-  background: rgba(32, 33, 36, 0.95);
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: min(560px, calc(100vh - 120px));
+  background: rgba(32, 33, 36, 0.97);
   color: #e8eaed;
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  border-radius: 8px;
-  padding: 10px 12px;
-  min-width: 200px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   pointer-events: auto;
+  overflow: hidden;
 }
 
-.meetvcon-row {
+.meetvcon-panel--collapsed .meetvcon-tabs,
+.meetvcon-panel--collapsed .meetvcon-body,
+.meetvcon-panel--collapsed .meetvcon-consent {
+  display: none !important;
+}
+
+.meetvcon-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 10px 12px;
 }
 
-.meetvcon-row + .meetvcon-row {
-  margin-top: 6px;
+.meetvcon-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 
 .meetvcon-title {
@@ -32,18 +46,223 @@
   opacity: 0.85;
 }
 
-.meetvcon-count,
+.meetvcon-icon-btn {
+  background: transparent;
+  color: #e8eaed;
+  border: 1px solid #5f6368;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  line-height: 20px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.meetvcon-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid #3c4043;
+}
+
+.meetvcon-tabs[hidden],
+.meetvcon-body[hidden] {
+  display: none;
+}
+
+.meetvcon-tab {
+  background: transparent;
+  color: #bdc1c6;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.meetvcon-tab--active {
+  color: #8ab4f8;
+  border-bottom-color: #8ab4f8;
+}
+
+.meetvcon-body {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  overscroll-behavior: contain;
+}
+
+.meetvcon-line + .meetvcon-line {
+  margin-top: 4px;
+}
+
+.meetvcon-who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.meetvcon-speaker {
+  font-weight: 600;
+  color: #8ab4f8;
+}
+
+.meetvcon-time {
+  font-size: 11px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.meetvcon-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.meetvcon-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+.meetvcon-tag {
+  font-size: 10px;
+  font-style: normal;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #3c4043;
+  color: #e8eaed;
+  white-space: nowrap;
+}
+
+.meetvcon-tag--commitment,
+.meetvcon-tag--decision {
+  background: #1e4620;
+  color: #a8dab5;
+}
+
+.meetvcon-tag--question,
+.meetvcon-tag--scheduling {
+  background: #1a3a5c;
+  color: #aecbfa;
+}
+
+.meetvcon-tag--objection,
+.meetvcon-tag--problem_report,
+.meetvcon-tag--negative {
+  background: #5c1f1a;
+  color: #f6aea9;
+}
+
+.meetvcon-tag--purchase_interest,
+.meetvcon-tag--positive {
+  background: #4d3d00;
+  color: #fde293;
+}
+
+.meetvcon-line--interim {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+.meetvcon-h {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9aa0a6;
+}
+
+.meetvcon-h:first-child {
+  margin-top: 2px;
+}
+
+.meetvcon-summary {
+  margin: 0;
+}
+
+.meetvcon-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.meetvcon-list li + li {
+  margin-top: 2px;
+}
+
+.meetvcon-empty,
+.meetvcon-muted {
+  margin: 6px 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.meetvcon-muted {
+  font-size: 11px;
+}
+
+.meetvcon-speaker-row + .meetvcon-speaker-row {
+  margin-top: 10px;
+}
+
+.meetvcon-speaker-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.meetvcon-bar {
+  margin-top: 4px;
+  height: 6px;
+  border-radius: 3px;
+  background: #3c4043;
+  overflow: hidden;
+}
+
+.meetvcon-bar-fill {
+  height: 100%;
+  background: #8ab4f8;
+}
+
+.meetvcon-bar-fill--positive {
+  background: #81c995;
+}
+
+.meetvcon-bar-fill--negative {
+  background: #f28b82;
+}
+
+.meetvcon-bar-fill--mixed {
+  background: #fdd663;
+}
+
+.meetvcon-footer {
+  padding: 8px 12px 10px;
+  border-top: 1px solid #3c4043;
+}
+
+.meetvcon-panel--collapsed .meetvcon-footer {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .meetvcon-consent {
   font-size: 11px;
   opacity: 0.72;
 }
 
-.meetvcon-consent {
-  max-width: 260px;
-}
-
 .meetvcon-actions {
   margin-top: 8px;
+}
+
+.meetvcon-actions:empty {
+  display: none;
 }
 
 .meetvcon-dot {

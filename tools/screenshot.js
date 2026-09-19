@@ -79,11 +79,11 @@ async function seedStorage(context, extensionId) {
       consent: {
         accepted: true,
         acceptedAt: new Date().toISOString(),
-        version: 1,
+        version: 2,
       },
       deliveryStatus: {
-        state: "processing",
-        source: "sippulse_ai",
+        state: "capturing",
+        source: "sippulse_ai_live",
         updatedAt: new Date().toISOString(),
       },
       queue: [],

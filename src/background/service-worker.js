@@ -6,6 +6,9 @@ import "../lib/config.js";
 import "../lib/storage.js";
 import "../lib/vcon.js";
 import "../lib/retry-policy.js";
+import "../lib/transcription.js";
+import "../lib/analysis.js";
+import "../lib/classification.js";
 import { secureStore } from "./secure-store.js";
 import { createWorkerCore, MESSAGE_TYPES } from "./worker-core.mjs";
 

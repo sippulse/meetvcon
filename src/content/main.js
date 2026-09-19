@@ -45,7 +45,12 @@
       inCallPanel.lock("capture_error");
       return;
     }
-    inCallPanel.setAudioActive(state.aiMeetingIds?.includes(meeting.meetingId) || false);
+    const live = state.liveSessions?.[meeting.meetingId];
+    if (live) transcriptCapture.startLive(live.streamStartedAt);
+    inCallPanel.setAudioActive(!!live, {
+      analysisEnabled: state.config.analysisReady,
+      classificationEnabled: state.config.classificationReady,
+    });
   }
 
   // "Stop and discard" is final for this call: the worker remembers the
@@ -62,9 +67,11 @@
   }
 
   async function enterCall() {
+    const state = await chrome.runtime.sendMessage({ type: "get_popup_state" }).catch(() => null);
     inCallPanel.init({
       onDiscard: discardForCall,
       onOpenSetup: () => chrome.runtime.openOptionsPage(),
+      collaborator: state?.collaboratorEmail ? { email: state.collaboratorEmail } : null,
     });
     await startCapture();
   }
@@ -105,8 +112,15 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === "ai_capture_state" && message.meetingId === currentMeetingId) {
-      inCallPanel.setAudioActive(!!message.active);
+    if (!message?.meetingId || message.meetingId !== currentMeetingId || !captureRunning) return;
+    if (message.type === "ai_capture_state") {
+      if (message.active) transcriptCapture.startLive(message.streamStartedAt);
+      inCallPanel.setAudioActive(!!message.active, {
+        analysisEnabled: message.analysisEnabled,
+        classificationEnabled: message.classificationEnabled,
+      });
+    } else if (message.type === "live_update") {
+      transcriptCapture.applyLiveUpdate(message.update);
     }
   });
 

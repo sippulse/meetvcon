@@ -79,8 +79,7 @@ h2 {
   background: #1e9d55;
 }
 
-.dot--processing,
-.dot--uploading,
+.dot--finalizing,
 .dot--queued {
   background: #e39416;
 }

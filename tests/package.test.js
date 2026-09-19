@@ -15,6 +15,7 @@ test("manifest references existing packaged files", () => {
     ...Object.values(manifest.icons),
     ...manifest.content_scripts.flatMap((entry) => [...entry.js, ...entry.css]),
     "src/offscreen/offscreen.html",
+    "src/offscreen/pcm-worklet.js",
     "src/permissions/microphone.html",
     "src/background/worker-core.mjs",
   ];
@@ -27,6 +28,8 @@ test("internal manifest has no arbitrary network destination", () => {
   assert.deepEqual(manifest.host_permissions, [
     "https://meet.google.com/*",
     "https://api.sippulse.com/*",
+    "https://api.dev.sippulse.ai/*",
+    "https://api.typesafe.ai/*",
   ]);
   assert.equal("optional_host_permissions" in manifest, false);
 });

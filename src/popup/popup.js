@@ -32,13 +32,12 @@ function statusCopy(status) {
   const states = {
     idle: ["Ready", "Open a Google Meet to begin."],
     capturing: [
-      status.source === "sippulse_ai" ? "High-quality capture active" : "Google captions active",
-      status.source === "sippulse_ai"
-        ? "Audio will be transcribed after the call."
-        : "Start SipPulse AI for better accuracy.",
+      status.source === "sippulse_ai_live" ? "Live transcription on" : "Google captions active",
+      status.source === "sippulse_ai_live"
+        ? "Transcript and AI notes update live in the Meet panel."
+        : "Start live transcription for accuracy, speaker names, and AI notes.",
     ],
-    uploading: ["Uploading audio to SipPulse", "Keep Chrome open until the upload finishes."],
-    processing: ["SipPulse AI is processing", "CRM storage and email are in progress."],
+    finalizing: ["Preparing the meeting report", "Keep Chrome open for a minute while the report is written."],
     delivered: ["Delivered", "Saved to CRM and sent for email delivery."],
     queued: ["Delivery queued", status.error || "SipPulse will retry automatically."],
     needs_attention: ["Delivery needs attention", status.error || "Retry from the outbox below."],
@@ -101,7 +100,12 @@ function renderLastTranscript(meta) {
   elements.lastTranscript.classList.toggle("hidden", !meta);
   if (!meta) return;
   const when = new Date(meta.savedAt).toLocaleString();
-  elements.lastTranscriptLabel.textContent = `${meta.subject || "Meeting"} · ${when} · Google captions copy`;
+  const kind = meta.hasReport
+    ? "transcript + report"
+    : meta.source?.startsWith("sippulse_ai_live")
+    ? "live transcript"
+    : "Google captions copy";
+  elements.lastTranscriptLabel.textContent = `${meta.subject || "Meeting"} · ${when} · ${kind}`;
 }
 
 async function refresh() {
@@ -125,7 +129,7 @@ async function refresh() {
     validEmail &&
     state.config.configured &&
     state.config.captureEnabled &&
-    state.config.preferredTranscription === "sippulse_ai" &&
+    state.config.liveTranscriptionReady &&
     inMeet &&
     meetingId &&
     !aiActive;
@@ -179,7 +183,7 @@ async function startAiCapture() {
       }
       throw new Error(result?.error || "Audio capture failed");
     }
-    elements.message.textContent = "SipPulse AI capture started.";
+    elements.message.textContent = "Live transcription started. Follow it in the Meet panel.";
     await refresh();
   } catch (error) {
     elements.message.textContent = error.message || String(error);

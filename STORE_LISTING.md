@@ -4,14 +4,15 @@
 
 **SipPulse Meet Capture**
 
-Internal SipPulse extension that creates diarized Google Meet transcripts,
-stores vCon records in CRM, and emails the capturing collaborator.
+Internal SipPulse extension for live Google Meet transcripts and AI meeting
+notes. Stores the vCon with the meeting report in CRM and emails the capturing
+collaborator.
 
 ## Single purpose
 
-For authorized Google Meet calls, capture speech, create a diarized transcript,
-store its vCon in SipPulse CRM, and email the transcript to the signed-in
-SipPulse collaborator.
+For authorized Google Meet calls, create a live speaker-labelled transcript and
+meeting notes, store the vCon in SipPulse CRM, and email the transcript and
+report to the signed-in SipPulse collaborator.
 
 ## Permission justifications
 
@@ -20,21 +21,28 @@ SipPulse collaborator.
 - `alarms`: failed-delivery retries and stale-meeting recovery.
 - `identity` / `identity.email`: identify the `@sippulse.com` collaborator who
   receives the transcript and owns the CRM capture.
-- `activeTab` / `tabCapture`: after an explicit action, record the active Meet
-  tab for SipPulse AI transcription. Audio capture cannot start automatically.
-- `offscreen`: keep the user-approved audio recorder alive after the popup closes.
+- `activeTab` / `tabCapture`: after an explicit action, stream the active Meet
+  tab's audio for live transcription. Audio capture cannot start automatically.
+- `offscreen`: keep the user-approved live transcription running after the
+  popup closes.
 - Microphone access is requested once through an extension page; the offscreen
   recorder reuses that grant.
 - `https://meet.google.com/*`: detect calls, capture caption fallback, and show
   the in-call disclosure/control panel.
-- `https://api.sippulse.com/*`: upload audio or vCon only to SipPulse ingestion.
+- `https://api.sippulse.com/*`: deliver the final vCon to SipPulse CRM storage.
+- `https://api.dev.sippulse.ai/*`: stream audio to SipPulse AI for live
+  transcription and send transcript text for meeting notes and the report.
+- `https://api.typesafe.ai/*`: classify each transcript line's intent,
+  sentiment, and action items.
 
 ## Data disclosure
 
 The extension handles personal communications, website content, meeting
 metadata, speaker names, the collaborator's company email, and—only after a
-per-meeting action—tab and microphone audio. It transfers these data to
-SipPulse for CRM storage, transcript email, and SipPulse.ai processing. It does
+per-meeting action—tab and microphone audio. It streams audio to SipPulse AI for
+transcription, sends transcript text to SipPulse AI for notes and to TypeSafe
+for classification, and transfers
+the final vCon to SipPulse for CRM storage and transcript email. It does
 not sell data, advertise, or send data to user-selected third parties.
 
 Publish [docs/PRIVACY.md](./docs/PRIVACY.md) at a dedicated SipPulse URL and use

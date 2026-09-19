@@ -1,12 +1,13 @@
 {
   "name": "sippulse-meet-capture",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Internal SipPulse Chrome extension for diarized Google Meet transcription.",
+  "description": "Internal SipPulse Chrome extension for live Google Meet transcription and meeting intelligence.",
   "scripts": {
     "check": "find src tools tests \\( -name '*.js' -o -name '*.mjs' \\) -print0 | xargs -0 -n1 node --check",
     "test": "node --test tests/*.test.js",
-    "screenshots": "node tools/screenshot.js"
+    "screenshots": "node tools/screenshot.js",
+    "e2e:live": "node tools/live-e2e.cjs"
   },
   "devDependencies": {
     "playwright": "^1.59.1"

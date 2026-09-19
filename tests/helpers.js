@@ -8,6 +8,10 @@ const { webcrypto } = require("node:crypto");
 function loadLibraries(relativePaths, globals = {}) {
   const context = vm.createContext({
     URL,
+    URLSearchParams,
+    AbortController,
+    setTimeout,
+    clearTimeout,
     console,
     crypto: webcrypto,
     Date,

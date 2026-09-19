@@ -5,8 +5,9 @@
   const ns = (root.MeetVcon = root.MeetVcon || {});
   if (ns.storage) return;
 
-  async function getConfig() {
-    return ns.config.get();
+  // local: settings saved on the options page (decrypted by the worker).
+  async function getConfig(local = {}) {
+    return ns.config.get(local);
   }
 
   async function getQueue() {
@@ -18,14 +19,18 @@
     await chrome.storage.local.set({ queue: items });
   }
 
+  // Version 2 added live transcription and SipPulse AI notes; earlier
+  // acceptances must be renewed before capture resumes.
+  const CONSENT_VERSION = 2;
+
   async function getConsent() {
     const { consent } = await chrome.storage.local.get("consent");
-    return consent || null;
+    return consent?.version >= CONSENT_VERSION ? consent : null;
   }
 
   async function setConsent(accepted) {
     const consent = accepted
-      ? { accepted: true, acceptedAt: new Date().toISOString(), version: 1 }
+      ? { accepted: true, acceptedAt: new Date().toISOString(), version: CONSENT_VERSION }
       : null;
     await chrome.storage.local.set({ consent });
     return consent;

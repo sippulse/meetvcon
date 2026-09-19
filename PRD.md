@@ -2,48 +2,82 @@
 
 ## Outcome
 
-After an authorized Google Meet call, SipPulse stores one diarized vCon in CRM
-and emails a readable transcript to the collaborator who captured it. Employees
-never configure webhooks, API keys, delivery modes, or file formats.
+During an authorized Google Meet call, the collaborator sees a live,
+speaker-labelled transcript and AI notes (summary, action items, topics,
+intents, talk time, sentiment). After the call, SipPulse stores one vCon with
+the transcript and meeting report in CRM and emails it to the collaborator
+who captured it. Employees never configure webhooks, API keys, delivery
+modes, or file formats.
+
+The bar is parity with read.ai and Otter on the in-call and post-call
+experience for Portuguese (pt-BR) meetings, without a bot joining the call.
 
 ## Required behavior
 
-1. Capture begins only after the collaborator accepts the in-product disclosure
-   and Chrome reports a signed-in profile on an allowed domain
-   (`sippulse.com` unless `AllowedEmailDomains` policy says otherwise).
+1. Capture begins only after the collaborator accepts the in-product
+   disclosure (consent version 2, which names SipPulse AI and TypeSafe) and
+   Chrome reports a signed-in profile on an allowed domain (`sippulse.com`
+   unless `AllowedEmailDomains` policy says otherwise).
 2. Google captions provide an automatic, speaker-labelled fallback stored only
    in the encrypted local recovery record until final delivery.
-3. The collaborator may start higher-quality audio capture with one extension
-   action. Record the Meet tab and local microphone, keeping the panel visible.
-4. SipPulse ingestion sends audio server-side to SipPulse.ai with
-   `model=pulse-telephony`, diarization enabled, and no language parameter.
-5. The final vCon preserves one UUID, maps speakers to `parties[]`, maps timed
-   segments to `dialog[]`, and identifies the collaborator in meeting metadata.
-6. Final processing stores/upserts one CRM vCon and queues exactly one email to
-   the collaborator. No intermediate transcript leaves the browser.
-7. “Stop and discard” stops captions and audio, removes recovery data, and
-   prevents delivery for that call, including after a tab reload. The marker
-   clears when the collaborator leaves the call or after four hours.
+3. The collaborator starts live transcription with one extension action. The
+   Meet tab (remote participants) and local microphone stream as separate mono
+   streams to the SipPulse AI streaming gateway (`pulse-stt-streaming-v1`,
+   pt-BR), and the panel stays visible throughout.
+4. Every final transcript line is classified inline by TypeSafe's Jev model
+   (intent, sentiment, action item) within about a second and tagged in the
+   live transcript.
+5. The in-call panel shows the live transcript (with interim text and intent
+   tags), AI notes refreshed about every minute, and per-speaker talk time and
+   sentiment. Remote speakers are named from Meet captions when possible.
+6. When the call ends, the full transcript is analyzed once more by SipPulse
+   AI (`deepseek-v4.1-flash`) to produce the final report: summary, key
+   points, topics with times, action items with owners, decisions, and open
+   questions, combined with the Jev intents and sentiment per speaker.
+7. The final vCon preserves one UUID, maps speakers to `parties[]`, maps timed
+   utterances to `dialog[]`, carries the report and speaker stats in
+   `analysis[]`, and identifies the collaborator in meeting metadata.
+8. Final processing stores/upserts one CRM vCon and queues exactly one email to
+   the collaborator. During the call, transcript text leaves the browser only
+   to SipPulse AI (notes) and TypeSafe (classification).
+9. “Stop and discard” stops captions, audio, and live analysis, removes
+   recovery data, and prevents delivery for that call, including after a tab
+   reload. The marker clears when the collaborator leaves the call or after
+   four hours.
+
+## Configuration
+
+Settings are vCon storage (`EndpointUrl`, `BearerToken`), email scope
+(`AllowedEmailDomains`), `SipPulseAiApiKey`, and `TypeSafeApiKey`. They come
+from Google Admin extension policy (preferred; locks the field) or, for fields
+the policy leaves unset, from local settings on the options page, stored
+encrypted. `CaptureEnabled` is a policy-only kill switch. Models and endpoints are
+fixed in code (`src/lib/config.js`). The streaming model runs on the SipPulse
+AI dev environment for now, so the SipPulse AI key must be a dev key.
 
 ## Reliability and privacy
 
-- Encrypt active captions and failed-delivery bodies at rest.
-- Keep recorded audio in memory and delete it after upload.
+- Encrypt active captions, live transcript segments, live notes, and
+  failed-delivery bodies at rest.
+- Never store audio: it is streamed to SipPulse AI and discarded.
+- Reconnect each stream automatically, buffering up to 60 seconds of audio,
+  while keeping one timeline across reconnects.
 - Persist retry metadata without transcript text; exhausted retries remain
   visible and manually recoverable.
 - Restore retry alarms after browser/service-worker restart.
-- Recover stale encrypted meetings (no snapshot for 10 minutes) through the
-  Google-caption fallback; give an in-flight audio upload 15 minutes before
-  falling back.
+- Recover stale encrypted meetings (no snapshot for 10 minutes). Give the
+  recorder 15 minutes to report the final transcript and report, then fall
+  back to the transcript saved during the call, then to Google captions.
 - Keep an encrypted local copy of the last captured transcript that the
-  collaborator can download as Markdown or vCon.
-- Use timeouts, idempotency by vCon UUID, and a fixed
-  SipPulse-only HTTPS origin.
-- Treat SipPulse.ai as a processor and delete server-side raw audio when
-  transcription completes or permanently fails.
+  collaborator can download as Markdown (with the report) or vCon.
+- Use timeouts, idempotency by vCon UUID, and fixed HTTPS destinations:
+  `api.sippulse.com`, `api.dev.sippulse.ai`, and `api.typesafe.ai`.
 
 ## Known pilot limitations
 
+- Provider keys come from managed policy and are readable on every enrolled
+  machine. Use dedicated, scoped, rotatable keys. Replacing them with
+  short-lived tokens issued by SipPulse is the next security step.
 - The collaborator identity is the Chrome profile email, asserted by the
   client. The backend must derive authorization from the credential, not from
   `captured_by_user.email`, until SSO replaces the managed bearer token.
@@ -51,18 +85,29 @@ never configure webhooks, API keys, delivery modes, or file formats.
   extension storage only; it is not a defense against profile-level access.
 - Microphone permission requires a one-time visit to the extension's
   permission page (or an `AudioCaptureAllowedUrls` policy).
-- Audio is retried three times from memory. If Chrome closes before the upload
-  finishes, the recording is lost and the Google-caption fallback is sent.
+- The streaming model (a nemotron-asr derivative) is multilingual, but the
+  dev gateway only accepts `language=pt-BR|pt` today (`multi`, `en`, `es` are
+  rejected with `UNSUPPORTED_LANGUAGE`; English audio returns no text). It is
+  mono and does not diarize. Remote
+  voices are named line by line from Google Meet captions; with captions off
+  they are all `Participant` and excluded from talk-time stats. The
+  collaborator's name is derived from their email address.
+- The streaming gateway occasionally cuts a sentence in two; halves with no
+  pause between them are rejoined.
 
 ## Non-goals
 
-The internal version does not support arbitrary webhooks, user API keys,
+The internal version does not support arbitrary webhooks, destinations
+outside the fixed SipPulse and TypeSafe hosts,
 multiple destinations, public self-service installation, transcript editing,
-or direct email sending from Chrome.
+a meeting bot, or direct email sending from Chrome.
 
 ## Success measures
 
 - At least 98% of authorized calls produce a CRM vCon without manual recovery.
-- At least 95% of final transcripts are emailed within five minutes.
-- Fewer than 5% of calls fall back from SipPulse AI to Google captions.
+- At least 95% of final transcripts and reports are emailed within five
+  minutes.
+- Live transcript latency under two seconds; live notes refresh within about
+  a minute of new speech.
+- Fewer than 5% of calls fall back from live transcription to Google captions.
 - No transcript is delivered after a collaborator chooses discard.

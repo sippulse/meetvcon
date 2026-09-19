@@ -112,6 +112,44 @@ a {
   font-size: 13px;
 }
 
+.hint {
+  color: #65717d;
+  font-size: 13px;
+}
+
+.field {
+  display: block;
+  margin-top: 14px;
+}
+
+.field span {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.field em {
+  color: #65717d;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.field input {
+  border: 1px solid #aab4bd;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.field input:disabled {
+  background: #f0f3f5;
+  color: #65717d;
+}
+
 .hidden {
   display: none !important;
 }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SipPulse Meet Capture",
-  "version": "0.2.0",
-  "description": "Securely deliver Google Meet captions to SipPulse for your organization.",
+  "version": "0.3.0",
+  "description": "Live Google Meet transcription, notes, and meeting reports delivered to SipPulse CRM.",
   "minimum_chrome_version": "120",
 
   "icons": {
@@ -23,7 +23,9 @@
 
   "host_permissions": [
     "https://meet.google.com/*",
-    "https://api.sippulse.com/*"
+    "https://api.sippulse.com/*",
+    "https://api.dev.sippulse.ai/*",
+    "https://api.typesafe.ai/*"
   ],
 
   "background": {
@@ -41,6 +43,8 @@
         "src/lib/storage.js",
         "src/lib/vcon.js",
         "src/lib/captions.js",
+        "src/lib/transcription.js",
+        "src/lib/classification.js",
         "src/content/captions-watchdog.js",
         "src/content/transcript-capture.js",
         "src/content/in-call-panel.js",

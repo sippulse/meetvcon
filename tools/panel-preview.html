@@ -105,18 +105,17 @@
       <div class="control">L</div>
     </div>
 
-    <div class="meetvcon-panel" id="meetvcon-panel">
-      <div class="meetvcon-row">
-        <span class="meetvcon-dot meetvcon-dot--green"></span>
-        <span class="meetvcon-title">SipPulse Meet Capture</span>
-      </div>
-      <div class="meetvcon-row meetvcon-status">Capturing Google captions</div>
-      <div class="meetvcon-row meetvcon-count">42 caption segments</div>
-      <div class="meetvcon-row meetvcon-consent">Transcript goes to SipPulse CRM and the collaborator's email.</div>
-      <div class="meetvcon-row meetvcon-actions">
-        <button class="meetvcon-btn">Stop and discard this call</button>
-      </div>
-    </div>
   </div>
+  <script src="../src/lib/transcription.js"></script>
+  <script src="../src/lib/classification.js"></script>
+  <script src="panel-preview-data.js"></script>
+  <script src="../src/content/in-call-panel.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    MeetVcon.inCallPanel.init({ collaborator: { email: "ana.souza@sippulse.com" } });
+    MeetVcon.inCallPanel.setAudioActive(true, { analysisEnabled: true, classificationEnabled: true });
+    const tab = params.get("tab");
+    if (tab) document.querySelector(`.meetvcon-tab:nth-child(${{ transcript: 1, notes: 2, speakers: 3 }[tab]})`).click();
+  </script>
 </body>
 </html>
