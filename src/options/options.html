@@ -11,8 +11,8 @@
       <h1>Meet Capture</h1>
       <p class="intro">
         Live, speaker-labelled Google Meet transcripts with AI notes. The
-        final transcript and meeting report are saved to SipPulse CRM and
-        emailed to the capturing collaborator.
+        final transcript and meeting report are saved to your organization's
+        vCon store and emailed to the capturing collaborator.
       </p>
 
       <section class="card" aria-labelledby="disclosure-title">
@@ -22,7 +22,7 @@
           <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to the transcription provider your organization configured (<strong>Deepgram</strong> or <strong>SipPulse AI</strong>), which returns the transcript; audio is not stored by the extension.</li>
           <li>The transcript is sent to <strong>SipPulse AI</strong> during and after the call to produce notes: summary, topics, action items, decisions, and open questions.</li>
           <li>Each transcribed line is sent to <strong>TypeSafe</strong> (Jev model) to classify its intent, sentiment, and whether it is an action item.</li>
-          <li>The final vCon, including the meeting report, is stored in SipPulse CRM and emailed to <strong id="email">your company email</strong>.</li>
+          <li>The final vCon, including the meeting report, is stored in your organization's vCon store and emailed to <strong id="email">your company email</strong>.</li>
         </ul>
         <p>
           Use capture only when meeting participants have been informed and the
@@ -68,15 +68,11 @@
           </label>
           <label class="field">
             <span>Allowed email domains <em data-source="AllowedEmailDomains"></em></span>
-            <input name="AllowedEmailDomains" type="text" placeholder="sippulse.com" />
+            <input name="AllowedEmailDomains" type="text" placeholder="example.com, partner.com" />
           </label>
           <label class="field">
             <span>Live transcription provider <em data-source="TranscriptionProvider"></em></span>
-            <select name="TranscriptionProvider">
-              <option value="">Deepgram (default)</option>
-              <option value="deepgram">Deepgram</option>
-              <option value="sippulse_ai">SipPulse AI streaming</option>
-            </select>
+            <select name="TranscriptionProvider"></select>
           </label>
           <label class="field">
             <span>Live transcription URL <em data-source="TranscriptionUrl"></em></span>
@@ -121,6 +117,7 @@
     </main>
     <script src="../lib/logger.js"></script>
     <script src="../lib/config.js"></script>
+    <script src="../lib/transcription.js"></script>
     <script src="../lib/storage.js"></script>
     <script src="options.js"></script>
   </body>

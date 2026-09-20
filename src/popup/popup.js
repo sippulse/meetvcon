@@ -28,17 +28,25 @@ function meetingIdFromUrl(url) {
   }
 }
 
+// Any live provider's transcript, e.g. deepgram_live or sippulse_ai_live.
+const isLive = (source) => typeof source === "string" && source.endsWith("_live");
+
 function statusCopy(status) {
   const states = {
     idle: ["Ready", "Open a Google Meet to begin."],
     capturing: [
-      status.source === "sippulse_ai_live" ? "Live transcription on" : "Google captions active",
-      status.source === "sippulse_ai_live"
+      isLive(status.source) ? "Live transcription on" : "Google captions active",
+      isLive(status.source)
         ? "Transcript and AI notes update live in the Meet panel."
         : "Start live transcription for accuracy, speaker names, and AI notes.",
     ],
     finalizing: ["Preparing the meeting report", "Keep Chrome open for a minute while the report is written."],
-    delivered: ["Delivered", "Saved to CRM and sent for email delivery."],
+    delivered: [
+      "Delivered",
+      status.duplicate
+        ? "The vCon store already had this meeting; the stored copy was kept."
+        : "Saved to the vCon store and sent for email delivery.",
+    ],
     queued: ["Delivery queued", status.error || "SipPulse will retry automatically."],
     needs_attention: ["Delivery needs attention", status.error || "Retry from the outbox below."],
     disabled_for_call: ["Discarded", "Nothing from that call was delivered."],
@@ -102,7 +110,7 @@ function renderLastTranscript(meta) {
   const when = new Date(meta.savedAt).toLocaleString();
   const kind = meta.hasReport
     ? "transcript + report"
-    : meta.source?.startsWith("sippulse_ai_live")
+    : meta.source?.includes("_live")
     ? "live transcript"
     : "Google captions copy";
   elements.lastTranscriptLabel.textContent = `${meta.subject || "Meeting"} · ${when} · ${kind}`;

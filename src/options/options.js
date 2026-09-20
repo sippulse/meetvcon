@@ -21,7 +21,22 @@ const elements = {
 
 let missingOrigins = [];
 
-const SECRET_FIELDS = new Set(["HmacSecret", "TranscriptionApiKey", "SipPulseAiApiKey", "TypeSafeApiKey"]);
+const { config: configLib, transcription } = self.MeetVcon;
+const SECRET_FIELDS = new Set(configLib.SECRET_FIELDS);
+
+// One option per provider the extension knows how to speak to.
+function renderProviders() {
+  const select = elements.settingsForm.elements.TranscriptionProvider;
+  select.replaceChildren();
+  for (const provider of ["", ...configLib.TRANSCRIPTION_PROVIDERS]) {
+    const option = document.createElement("option");
+    option.value = provider;
+    option.textContent = provider
+      ? transcription.profile(provider).label
+      : `${transcription.profile(configLib.DEFAULTS.transcriptionProvider).label} (default)`;
+    select.append(option);
+  }
+}
 const SOURCE_LABELS = {
   policy: "set by Google Admin",
   local: "saved on this computer",
@@ -57,13 +72,10 @@ function renderAccess(origins) {
 }
 
 function originsInForm() {
-  const value = (name) => elements.settingsForm.elements[name].value.trim();
-  return self.MeetVcon.config.originsFor({
-    endpointUrl: value("EndpointUrl"),
-    transcriptionUrl: value("TranscriptionUrl"),
-    sippulseAiUrl: value("SipPulseAiUrl"),
-    typesafeUrl: value("TypeSafeUrl"),
-  });
+  const fields = Object.fromEntries(
+    configLib.URL_FIELDS.map((field) => [field, elements.settingsForm.elements[field].value.trim()])
+  );
+  return configLib.originsFor(fields);
 }
 
 async function requestAccess(origins) {
@@ -77,6 +89,7 @@ async function requestAccess(origins) {
 }
 
 async function loadSettings() {
+  renderProviders();
   const result = await chrome.runtime.sendMessage({ type: "get_settings" });
   if (!result?.ok) throw new Error(result?.error || "Could not load settings");
   renderSettings(result.fields);
@@ -111,9 +124,9 @@ async function refresh() {
       ? "Enabled"
       : "Disabled by administrator"
     : "Waiting for your consent";
-  const providers = { deepgram: "Deepgram nova-3, multilingual", sippulse_ai: "SipPulse AI streaming, Portuguese" };
+  const provider = transcription.profile(state.config.transcriptionProvider);
   elements.provider.textContent = state.config.liveTranscriptionReady
-    ? `${providers[state.config.transcriptionProvider] || state.config.transcriptionProvider} (Google captions fallback)`
+    ? `${provider ? provider.label : state.config.transcriptionProvider} (Google captions fallback)`
     : "Google captions only (transcription URL and key not configured)";
   elements.notes.textContent = state.config.analysisReady
     ? "SipPulse AI"

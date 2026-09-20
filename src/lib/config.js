@@ -8,7 +8,8 @@
 // Fields:
 // - EndpointUrl + HmacSecret: the vCon store that receives the final vCon,
 //   signed with X-MeetVcon-Signature (HMAC-SHA256 of the body).
-// - AllowedEmailDomains: who may capture and receive the email.
+// - AllowedEmailDomains: who may capture and receive the email. Required:
+//   there is no built-in domain, so capture stays off until it is set.
 // - TranscriptionProvider ("deepgram" | "sippulse_ai") + TranscriptionUrl +
 //   TranscriptionApiKey: live transcription over the /v1/listen WebSocket.
 // - SipPulseAiUrl + SipPulseAiApiKey: meeting notes (OpenAI-compatible
@@ -36,7 +37,7 @@
   const DEFAULTS = Object.freeze({
     transcriptionProvider: "deepgram",
     captureEnabled: true,
-    allowedEmailDomains: ["sippulse.com"],
+    allowedEmailDomains: [],
   });
 
   const LOCAL_FIELDS = Object.freeze([
@@ -89,34 +90,45 @@
     }
   }
 
-  // "https://host/base/" -> "https://host/base"
-  function base(url) {
-    return url.href.replace(/\/+$/, "");
+  // "https://host/base/" -> "https://host/base"; "" when unset or invalid.
+  function withoutTrailingSlash(value) {
+    const url = value instanceof URL ? value : httpsUrl(value);
+    return url ? url.href.replace(/\/+$/, "") : "";
   }
 
   // Origin patterns that need host permission: fetch from extension pages to
-  // servers without CORS. The transcription WebSocket needs none.
-  function originsFor(config) {
+  // servers without CORS. The transcription WebSocket needs none. `raw` is
+  // keyed by the policy/settings field names (URL_FIELDS).
+  function originsFor(raw = {}) {
     const origins = new Set();
-    for (const value of [config.endpointUrl, config.transcriptionUrl, config.sippulseAiUrl, config.typesafeUrl]) {
-      const url = httpsUrl(value);
+    for (const field of URL_FIELDS) {
+      const url = httpsUrl(raw[field]);
       if (url) origins.add(`${url.origin}/*`);
     }
     return [...origins];
   }
 
   function normalizeDomains(value) {
-    const domains = (Array.isArray(value) ? value : [])
+    return (Array.isArray(value) ? value : String(value || "").split(/[\s,;]+/))
       .filter((domain) => typeof domain === "string")
       .map((domain) => domain.trim().toLowerCase().replace(/^@/, ""))
       .filter(Boolean);
-    return domains.length ? domains : DEFAULTS.allowedEmailDomains;
   }
 
+  // No domain configured means nobody is allowed: capture fails closed.
   function isAllowedEmail(email, config = DEFAULTS) {
     if (typeof email !== "string" || !email.includes("@")) return false;
     const domain = email.slice(email.lastIndexOf("@") + 1).toLowerCase();
-    return (config.allowedEmailDomains || DEFAULTS.allowedEmailDomains).includes(domain);
+    return (config.allowedEmailDomains || []).includes(domain);
+  }
+
+  // Is this pair usable as a delivery target? Narrower than normalize(),
+  // which also decides whether capture may start at all.
+  function deliveryTarget(endpointUrl, hmacSecret) {
+    const url = withoutTrailingSlash(httpsUrl(endpointUrl));
+    if (!url) return { ok: false, error: "The vCon store endpoint must be an https:// URL" };
+    if (!text(hmacSecret)) return { ok: false, error: "The vCon store HMAC secret is not configured" };
+    return { ok: true, url };
   }
 
   function normalize(raw = {}) {
@@ -128,46 +140,47 @@
     if (!TRANSCRIPTION_PROVIDERS.includes(provider)) {
       errors.TranscriptionProvider = `TranscriptionProvider must be one of ${TRANSCRIPTION_PROVIDERS.join(", ")}`;
     }
-    const stream = httpsUrl(raw.TranscriptionUrl);
     const transcriptionApiKey = text(raw.TranscriptionApiKey);
-    const store = httpsUrl(raw.EndpointUrl);
-    const sippulse = httpsUrl(raw.SipPulseAiUrl);
-    const typesafe = httpsUrl(raw.TypeSafeUrl);
+    const store = withoutTrailingSlash(raw.EndpointUrl);
+    const streamBase = withoutTrailingSlash(raw.TranscriptionUrl);
+    const sippulse = withoutTrailingSlash(raw.SipPulseAiUrl);
+    const typesafe = withoutTrailingSlash(raw.TypeSafeUrl);
+    const allowedEmailDomains = normalizeDomains(raw.AllowedEmailDomains);
     const hmacSecret = text(raw.HmacSecret);
     const sippulseAiApiKey = text(raw.SipPulseAiApiKey);
     const typesafeApiKey = text(raw.TypeSafeApiKey);
-    const configured = !!store && !!hmacSecret;
+    const configured = !!store && !!hmacSecret && allowedEmailDomains.length > 0;
+    const missing = !store || !hmacSecret ? "the vCon store endpoint and HMAC secret" : "the allowed email domains";
 
-    const config = {
-      endpointUrl: store ? store.href : "",
+    return {
+      endpointUrl: store,
       hmacSecret,
-      transcriptionUrl: stream ? base(stream) : "",
+      transcriptionUrl: streamBase,
+      // The key travels with the rest of the transcription settings.
       transcriptionApiKey,
-      sippulseAiUrl: sippulse ? base(sippulse) : "",
+      sippulseAiUrl: sippulse,
       sippulseAiApiKey,
-      typesafeUrl: typesafe ? base(typesafe) : "",
+      typesafeUrl: typesafe,
       typesafeApiKey,
       captureEnabled:
         raw.CaptureEnabled === undefined ? DEFAULTS.captureEnabled : raw.CaptureEnabled === true,
-      allowedEmailDomains: normalizeDomains(raw.AllowedEmailDomains),
+      allowedEmailDomains,
       configured,
-      error:
-        errors.EndpointUrl ||
-        (configured ? "" : "Configure the vCon store endpoint and HMAC secret in Google Admin or in Settings"),
+      error: errors.EndpointUrl || (configured ? "" : `Configure ${missing} in Google Admin or in Settings`),
       errors,
-      liveTranscriptionReady: !!stream && !!transcriptionApiKey && !errors.TranscriptionProvider,
+      liveTranscriptionReady: !!streamBase && !!transcriptionApiKey && !errors.TranscriptionProvider,
       analysisReady: !!sippulse && !!sippulseAiApiKey,
       classificationReady: !!typesafe && !!typesafeApiKey,
       transcription: {
         provider,
-        apiBase: stream ? base(stream) : "",
-        streamBase: stream ? base(stream).replace(/^https:/, "wss:") : "",
+        apiBase: streamBase,
+        streamBase: streamBase.replace(/^https:/, "wss:"),
+        apiKey: transcriptionApiKey,
       },
-      analysis: { ...ANALYSIS, apiBase: sippulse ? `${base(sippulse)}/v1` : "" },
-      classification: { ...CLASSIFICATION, apiBase: typesafe ? `${base(typesafe)}/v1` : "" },
+      analysis: { ...ANALYSIS, apiBase: sippulse ? `${sippulse}/v1` : "" },
+      classification: { ...CLASSIFICATION, apiBase: typesafe ? `${typesafe}/v1` : "" },
+      origins: originsFor(raw),
     };
-    config.origins = originsFor(config);
-    return config;
   }
 
   async function readManaged() {
@@ -193,6 +206,7 @@
     SECRET_FIELDS,
     URL_FIELDS,
     merge,
+    deliveryTarget,
     normalize,
     originsFor,
     readManaged,

@@ -19,6 +19,7 @@ const core = createWorkerCore({
   secureStore,
   lib: self.MeetVcon,
   fetch: (...args) => fetch(...args),
+  crypto,
   version: chrome.runtime.getManifest().version,
 });
 

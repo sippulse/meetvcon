@@ -28,9 +28,11 @@
   // Meet's own caption label for the local participant, by UI language.
   const SELF_CAPTION_LABELS = new Set(["you", "você", "voce", "tú", "tu", "usted", "vous", "du", "sie"]);
 
-  // Model choices per provider (not endpoints; those come from config).
+  // Everything provider-specific except the endpoint, which is configured:
+  // label for the options page, model choices, and how to check the key.
   const PROFILES = Object.freeze({
     deepgram: Object.freeze({
+      label: "Deepgram nova-3, multilingual",
       model: "nova-3",
       // Code-switching PT/ES/EN (nova-3 multilingual).
       language: "multi",
@@ -45,8 +47,15 @@
         // Keep meeting audio out of Deepgram's model-improvement program.
         mip_opt_out: "true",
       }),
+      keyCheck: Object.freeze({
+        path: "/v1/projects",
+        header: (apiKey) => ({ Authorization: `Token ${apiKey}` }),
+        // A listen-only key is refused project listing but is still valid.
+        alsoOk: Object.freeze([403]),
+      }),
     }),
     sippulse_ai: Object.freeze({
+      label: "SipPulse AI streaming, Portuguese",
       model: "pulse-stt-streaming-v1",
       // The model is multilingual, but the gateway accepts only pt-BR|pt.
       language: "pt-BR",
@@ -54,6 +63,11 @@
       // Only parameters the gateway documents; it clamps endpointing to
       // [560, 1500] ms and rejects unknown languages.
       params: Object.freeze({ endpointing: "700" }),
+      keyCheck: Object.freeze({
+        path: "/v1/openai/models",
+        header: (apiKey) => ({ "api-key": apiKey }),
+        alsoOk: Object.freeze([]),
+      }),
     }),
   });
 
@@ -76,22 +90,29 @@
     return `${streamBase}/v1/listen?${params}`;
   }
 
-  // Key check for the options page. Deepgram: a listen-only key may be
-  // refused project listing (403) yet be valid; only 401 means a bad key.
+  // Key check for the options page, driven by the provider's profile.
+  // Only 401 means the key itself is wrong.
   async function checkKey(fetchImpl, { provider, apiBase, apiKey }) {
-    if (!apiKey || !apiBase) return { ok: false, error: "Not configured" };
-    const request =
-      provider === "deepgram"
-        ? [`${apiBase}/v1/projects`, { headers: { Authorization: `Token ${apiKey}` } }]
-        : [`${apiBase}/v1/openai/models`, { headers: { "api-key": apiKey } }];
+    const chosen = profile(provider);
+    if (!apiKey || !apiBase || !chosen) return { ok: false, error: "Not configured" };
+    const { path, header, alsoOk } = chosen.keyCheck;
     try {
-      const response = await fetchImpl(...request);
+      const response = await fetchImpl(`${apiBase}${path}`, { headers: header(apiKey) });
       if (response.status === 401) return { ok: false, status: 401, error: "Key rejected" };
-      const ok = response.ok || (provider === "deepgram" && response.status === 403);
-      return ok ? { ok: true, status: response.status } : { ok: false, status: response.status, error: `HTTP ${response.status}` };
+      return response.ok || alsoOk.includes(response.status)
+        ? { ok: true, status: response.status }
+        : { ok: false, status: response.status, error: `HTTP ${response.status}` };
     } catch (error) {
       return { ok: false, error: error.message };
     }
+  }
+
+  // The X-SipPulse-Transcription-Source value (and delivery status) for a
+  // transcript from this provider, so a Deepgram transcript is never
+  // labelled as another provider's.
+  function sourceLabel(provider, { recovered = false } = {}) {
+    const known = profile(provider) ? provider : "unknown";
+    return recovered ? `${known}_live_recovered` : `${known}_live`;
   }
 
   function mostCommon(values) {
@@ -414,6 +435,7 @@
     profile,
     listenUrl,
     checkKey,
+    sourceLabel,
     parseMessage,
     appendSegment,
     dropEcho,

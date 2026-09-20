@@ -17,7 +17,7 @@ Each setting is read from two places, field by field:
 |---|---|
 | `EndpointUrl` | Required. HTTPS URL of the vCon store. SipPulse: `https://crm.sippulse.com/api/vcons/ingest` |
 | `HmacSecret` | Required. The store's shared secret (SipPulse CRM: `VCON_HMAC_SECRET`); every delivery is signed with it |
-| `AllowedEmailDomains` | Chrome profile domains allowed to capture and receive the email (default `sippulse.com`) |
+| `AllowedEmailDomains` | Required. Chrome profile domains allowed to capture and receive the email, e.g. `["sippulse.com"]`. There is no built-in domain: capture stays off until this is set |
 | `TranscriptionProvider` | `deepgram` (default; nova-3 multilingual, diarized) or `sippulse_ai` (SipPulse AI streaming gateway, pt-BR) |
 | `TranscriptionUrl` | HTTPS base of the transcription provider: `https://api.deepgram.com`, or `https://api.dev.sippulse.ai` for SipPulse streaming (dev only for now) |
 | `TranscriptionApiKey` | Transcription key (Deepgram: a dedicated `usage:write` key) |
@@ -33,12 +33,16 @@ is delivered; without the SipPulse AI URL and key only Google captions are
 captured (no live transcript or notes); without the TypeSafe URL and key
 lines are not tagged and the report has no intents or sentiment.
 
-**Host access.** The manifest only asks for `meet.google.com`; every
-configured server is an *optional* host permission that Chrome grants per
-host. Saving settings asks for the hosts in the form; for URLs pushed by
-Google Admin, the options page shows **Allow access** (one click per
-collaborator, because Chrome only grants optional permissions from a user
-action). The popup points there while access is missing.
+**Host access needs one click per collaborator, even with policy.** The
+manifest only asks for `meet.google.com`; every configured server is an
+*optional* host permission. Chrome grants those only from a user action, and
+extension policy cannot grant them, so Google Admin alone does not finish the
+setup. Saving settings asks for the hosts in the form; for URLs pushed by
+Google Admin, the options page shows **Allow access**, and the popup points
+there. Until someone clicks, live transcription and notes fail and finished
+meetings sit in the extension's outbox (they are delivered on the next retry
+after access is granted, nothing is lost). Tell the pilot group to open the
+options page once and choose **Allow access**.
 
 ### Google Admin (admin.google.com)
 

@@ -46,8 +46,10 @@ no caption matches).
 
 Transcription sources:
 
-- `sippulse_ai_live` — full live transcript plus the final report
-- `sippulse_ai_live_recovered` — the recorder did not report back; the
+- `<provider>_live` (`deepgram_live`, `sippulse_ai_live`) — full live
+  transcript plus the final report, labelled with the provider that produced
+  it
+- `<provider>_live_recovered` — the recorder did not report back; the
   transcript was rebuilt from segments saved during the call, with the latest
   live notes and the classifications made so far
 - `google_captions` — live transcription was never started
@@ -122,7 +124,12 @@ The store is idempotent by vCon `uuid` and **keeps the first copy**: a later
 delivery of the same uuid answers `duplicate` without replacing it. The
 extension delivers once per meeting (live result, else saved segments, else
 captions) and retries the same document, so this is safe; it also means a
-better transcript can never replace a worse one after the fact.
+better transcript can never replace a worse one after the fact. A `duplicate`
+answer is shown to the collaborator as delivered *and* already stored, rather
+than as a fresh save.
+
+Queued deliveries are retried against the endpoint and secret configured **at
+retry time**, so rotating either one does not strand the outbox.
 
 ## Gaps on the CRM side
 

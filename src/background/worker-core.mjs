@@ -48,6 +48,7 @@ export function createWorkerCore({
   secureStore,
   lib,
   fetch,
+  crypto = globalThis.crypto,
   now = () => Date.now(),
   version = "0.0.0",
 }) {
@@ -89,10 +90,11 @@ export function createWorkerCore({
     const index = await readMap(local, ACTIVE_INDEX_KEY);
     index[record.meetingId] = { uuid: record.uuid, updatedAt: iso() };
     await writeMap(local, ACTIVE_INDEX_KEY, index);
+    const config = await getConfig();
     const session = await getAiSession(record.meetingId);
     await storage.setDeliveryStatus({
       state: "capturing",
-      source: session ? "sippulse_ai_live" : "google_captions",
+      source: session ? transcription.sourceLabel(config.transcription.provider) : "google_captions",
       error: "",
     });
     // Caption speaker names let the recorder label remote voices in its
@@ -259,7 +261,6 @@ export function createWorkerCore({
       collaborator: profile,
       captions: record.utterances || [],
       config: {
-        transcriptionApiKey: config.transcriptionApiKey,
         sippulseAiApiKey: config.sippulseAiApiKey,
         typesafeApiKey: config.typesafeApiKey,
         transcription: config.transcription,
@@ -278,7 +279,11 @@ export function createWorkerCore({
     const streamStartedAt = result.streamStartedAt || iso();
     await setAiSession(meetingId, { state: "recording", startedAt: iso(), streamStartedAt, tabId });
     await chrome.alarms.clear(OFFSCREEN_CLEANUP_ALARM);
-    await storage.setDeliveryStatus({ state: "capturing", source: "sippulse_ai_live", error: "" });
+    await storage.setDeliveryStatus({
+      state: "capturing",
+      source: transcription.sourceLabel(config.transcription.provider),
+      error: "",
+    });
     await notifyTab(tabId, meetingId, true, {
       streamStartedAt,
       analysisEnabled: config.analysisReady,
@@ -321,7 +326,7 @@ export function createWorkerCore({
     }
     const session = await getAiSession(meetingId);
     if (session?.state === "finalizing") {
-      return { ok: true, pending: true, source: "sippulse_ai_live" };
+      return { ok: true, pending: true, source: session.source || "" };
     }
     const profile = await requireProfile();
     if (!profile) return { ok: false, error: "Collaborator email unavailable" };
@@ -346,14 +351,16 @@ export function createWorkerCore({
           captions: record.utterances || [],
         });
         if (response?.ok) {
+          const source = transcription.sourceLabel(config.transcription.provider);
           await setAiSession(meetingId, {
             ...session,
             state: "finalizing",
             deliveryKind,
             finalizeStartedAt: iso(),
+            source,
           });
-          await storage.setDeliveryStatus({ state: "finalizing", source: "sippulse_ai_live", error: "" });
-          return { ok: true, pending: true, source: "sippulse_ai_live" };
+          await storage.setDeliveryStatus({ state: "finalizing", source, error: "" });
+          return { ok: true, pending: true, source };
         }
         log.warn("live recorder unavailable; using the transcript saved during the call", response?.error);
         await clearAiSession(meetingId, session);
@@ -373,7 +380,7 @@ export function createWorkerCore({
         deliveryKind,
         transcriptionSource,
         transcription: {
-          provider: live.transcription?.provider || "sippulse_ai",
+          provider: live.transcription?.provider || null,
           model: live.transcription?.model || null,
           language: live.transcription?.language || null,
           stream_started_at: live.streamStartedAt || null,
@@ -434,14 +441,17 @@ export function createWorkerCore({
         {
           utterances,
           streamStartedAt,
-          transcription: config.transcription,
+          transcription: {
+            provider: config.transcription.provider,
+            ...(transcription.profile(config.transcription.provider) || {}),
+          },
           analysis: analysis.withClassification(record.liveAnalysis || null, summary),
           analysisModel: config.analysis.liveModel,
           classifications,
           classificationModel: config.classification.model,
           analysisError: record.liveAnalysis ? "Final report unavailable; live notes attached" : "",
         },
-        "sippulse_ai_live_recovered"
+        transcription.sourceLabel(config.transcription.provider, { recovered: true })
       );
     }
     const fallback = assembleVcon(record, deliveryKind, "google_captions_fallback", profile);
@@ -486,7 +496,14 @@ export function createWorkerCore({
     const profile = await requireProfile();
     if (!profile) return { ok: false, error: "Collaborator email unavailable" };
     if (result?.ok && result.utterances?.length) {
-      return deliverLive(record, meetingId, deliveryKind, profile, result, "sippulse_ai_live");
+      return deliverLive(
+        record,
+        meetingId,
+        deliveryKind,
+        profile,
+        result,
+        transcription.sourceLabel(result.transcription?.provider)
+      );
     }
     log.warn("live transcript unavailable; falling back", result?.error);
     return deliverFallback(record, meetingId, deliveryKind, profile, session);
@@ -547,6 +564,9 @@ export function createWorkerCore({
       await storage.setDeliveryStatus({
         state: "delivered",
         source: vconDocument.attachments?.[0]?.body?.transcription_source,
+        // The store keeps the first copy of a uuid: say so instead of
+        // claiming this delivery replaced it.
+        duplicate: !!result.duplicate,
         lastSuccessAt: iso(),
         error: "",
       });
@@ -594,10 +614,17 @@ export function createWorkerCore({
     }
   }
 
+  function httpError(result) {
+    if (result.status) {
+      return { ok: false, status: result.status, error: result.payload?.error || `HTTP ${result.status}` };
+    }
+    return { ok: false, error: result.error };
+  }
+
   // 202 accepted, 200 duplicate (the store keeps the first copy of a uuid).
   async function postVcon(document, endpointUrl, hmacSecret, deliveryKind) {
-    const config = configLib.normalize({ EndpointUrl: endpointUrl, HmacSecret: hmacSecret });
-    if (!config.configured) return { ok: false, error: config.error };
+    const target = configLib.deliveryTarget(endpointUrl, hmacSecret);
+    if (!target.ok) return { ok: false, error: target.error };
     const result = await signedPost(endpointUrl, hmacSecret, JSON.stringify(document), {
       "X-SipPulse-Delivery": deliveryKind,
       "X-SipPulse-Transcription-Source":
@@ -606,23 +633,20 @@ export function createWorkerCore({
     if (result.ok) {
       return { ok: true, status: result.status, duplicate: result.payload?.status === "duplicate" };
     }
-    if (result.status) {
-      return { ok: false, status: result.status, error: result.payload?.error || `HTTP ${result.status}` };
-    }
-    return { ok: false, error: result.error };
+    return httpError(result);
   }
 
   // The store has no test mode: any valid vCon is stored and emailed. Send a
   // signed body that is not a vCon instead. The store checks the signature
   // before parsing, so 400 proves the secret is right and nothing is stored.
   async function probeStorage(config) {
-    if (!config.configured) return { ok: false, error: config.error };
+    const target = configLib.deliveryTarget(config.endpointUrl, config.hmacSecret);
+    if (!target.ok) return { ok: false, error: target.error };
     const result = await signedPost(config.endpointUrl, config.hmacSecret, JSON.stringify({ connection_test: true }));
     if (result.status === 400) return { ok: true, status: 400, detail: "Signature accepted" };
     if (result.status === 401) return { ok: false, status: 401, error: "HMAC secret rejected" };
     if (result.status === 503) return { ok: false, status: 503, error: "vCon store is not configured on the server" };
-    if (result.status) return { ok: false, status: result.status, error: `HTTP ${result.status}` };
-    return { ok: false, error: result.error };
+    return httpError(result);
   }
 
   async function enqueue(document, endpointUrl, deliveryKind, error) {
@@ -656,13 +680,15 @@ export function createWorkerCore({
       return { ok: false, error: "Encrypted payload not found" };
     }
 
+    // Endpoint and secret are read now, not when the item was queued: after
+    // a rotation the stored pair would fail every retry with 401.
     const config = await getConfig();
-    const result = await postVcon(payload.document, payload.endpointUrl, config.hmacSecret, item.deliveryKind);
+    const result = await postVcon(payload.document, config.endpointUrl, config.hmacSecret, item.deliveryKind);
     if (result.ok) {
       await secureStore.remove(`queue:${id}`);
       await chrome.alarms.clear(retryAlarmName(id));
       await storage.setQueue(queue.filter((candidate) => candidate.id !== id));
-      await refreshQueueStatus({ lastSuccessAt: iso() });
+      await refreshQueueStatus({ lastSuccessAt: iso(), duplicate: !!result.duplicate });
       return result;
     }
 
@@ -882,11 +908,7 @@ export function createWorkerCore({
     }
     const [storageResult, transcriptionResult, sippulseAiResult, typesafeResult] = await Promise.all([
       probeStorage(config),
-      transcription.checkKey(fetch, {
-        provider: config.transcription.provider,
-        apiBase: config.transcription.apiBase,
-        apiKey: config.transcriptionApiKey,
-      }),
+      transcription.checkKey(fetch, config.transcription),
       analysis.checkKey(fetch, config.analysis.apiBase, config.sippulseAiApiKey),
       classification.checkKey(fetch, config.classification.apiBase, config.typesafeApiKey),
     ]);

@@ -122,7 +122,7 @@ function sendAudio(current, stream, buffer) {
 function connect(current, stream) {
   const socket = new WebSocket(transcription.listenUrl(current.config.transcription), [
     "token",
-    current.config.transcriptionApiKey,
+    current.config.transcription.apiKey,
   ]);
   socket.binaryType = "arraybuffer";
   stream.socket = socket;
@@ -371,7 +371,7 @@ async function startCapture(message) {
     return { ok: false, error: "Another meeting is already being captured", code: "busy" };
   }
   const profile = transcription.profile(message.config?.transcription?.provider);
-  if (!message.config?.transcriptionApiKey || !message.config?.transcription?.streamBase || !profile) {
+  if (!message.config?.transcription?.apiKey || !message.config?.transcription?.streamBase || !profile) {
     return { ok: false, error: "Live transcription is not configured", code: "not_configured" };
   }
   const streams = await openStreams(message.streamId);

@@ -49,13 +49,16 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
 
 ## Configuration
 
-No endpoint is built in (open source). Settings are the vCon store
+No endpoint and no email domain are built in (open source). Settings are the vCon store
 (`EndpointUrl`, `HmacSecret`), email scope
 (`AllowedEmailDomains`), live transcription (`TranscriptionProvider`,
 `TranscriptionUrl`, `TranscriptionApiKey`), SipPulse AI notes
 (`SipPulseAiUrl`, `SipPulseAiApiKey`),
-and TypeSafe (`TypeSafeUrl`, `TypeSafeApiKey`). Configured hosts are optional
-host permissions granted at runtime. They come
+and TypeSafe (`TypeSafeUrl`, `TypeSafeApiKey`). `AllowedEmailDomains` is
+required; with none set, no profile may capture. Configured hosts are optional
+host permissions granted at runtime, which Chrome grants only from a user
+action: each collaborator allows them once from the options page, even when
+every value comes from Google Admin. They come
 from Google Admin extension policy (preferred; locks the field) or, for fields
 the policy leaves unset, from local settings on the options page, stored
 encrypted. `CaptureEnabled` is a policy-only kill switch. Models and endpoints are

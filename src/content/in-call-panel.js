@@ -323,8 +323,8 @@
     }
 
     dom.consent.textContent = audioActive
-      ? "Audio is transcribed live, notes are written by SipPulse AI, and each line is classified by TypeSafe. The transcript goes to your CRM and your email."
-      : "Transcript goes to SipPulse CRM and the collaborator's email.";
+      ? "Audio is transcribed live, notes are written by SipPulse AI, and each line is classified by TypeSafe. The transcript goes to your organization's vCon store and your email."
+      : "Transcript goes to your organization's vCon store and the collaborator's email.";
     const action = actionFor();
     dom.actions.replaceChildren();
     if (action) {

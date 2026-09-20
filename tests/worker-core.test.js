@@ -32,6 +32,7 @@ async function setup({ fetchResponder, chromeOptions, policy = {} } = {}) {
   await chrome.storage.managed.set({
     EndpointUrl: ENDPOINT,
     HmacSecret: HMAC_SECRET,
+    AllowedEmailDomains: ["sippulse.com"],
     TranscriptionProvider: "deepgram",
     TranscriptionUrl: "https://api.deepgram.com",
     TranscriptionApiKey: "dg-key",
@@ -207,7 +208,7 @@ test("connection test proves the HMAC secret with a signed non-vCon probe, and c
 const LIVE_RESULT = {
   ok: true,
   streamStartedAt: "2026-09-04T12:00:00.500Z",
-  transcription: { provider: "sippulse_ai", model: "pulse-stt-streaming-v1", language: "pt-BR" },
+  transcription: { provider: "deepgram", model: "nova-3", language: "multi" },
   utterances: [
     { segment_id: 1, speaker: "Ana", email: "ana@sippulse.com", text: "Envio a proposta.", start: "2026-09-04T12:00:02.000Z", duration: 2, channel: "microphone" },
     { segment_id: 2, speaker: "Bruno Lima", text: "Combinado.", start: "2026-09-04T12:00:05.000Z", duration: 1, channel: "meeting" },
@@ -251,7 +252,7 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
   assert.equal(start.streamId, "stream-for-tab-42");
   assert.equal(start.target, "offscreen");
-  assert.equal(start.config.transcriptionApiKey, "dg-key");
+  assert.equal(start.config.transcription.apiKey, "dg-key");
   assert.equal(start.config.sippulseAiApiKey, "sp-key");
   assert.equal(start.config.typesafeApiKey, "ts-key");
   assert.equal(start.config.transcription.provider, "deepgram");
@@ -276,7 +277,7 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   const popup = await send(core, { type: "get_popup_state" });
   assert.deepEqual(popup.aiMeetingIds, ["abc-defg-hij"]);
   assert.deepEqual(popup.liveSessions, { "abc-defg-hij": { streamStartedAt: "2026-09-04T12:00:00.500Z" } });
-  assert.equal(popup.status.source, "sippulse_ai_live");
+  assert.equal(popup.status.source, "deepgram_live");
 });
 
 test("live capture is refused when the transcription key is not configured", async () => {
@@ -330,6 +331,7 @@ test("call end hands off to the recorder, then its result delivers one live vCon
   const ended = await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
   assert.equal(ended.ok, true);
   assert.equal(ended.pending, true);
+  assert.equal(ended.source, "deepgram_live");
   const stop = chrome.runtime._messages.find((m) => m.type === "ai_capture_stop");
   assert.equal(stop.captions[0].speaker, "Ana");
   assert.equal(stop.collaborator.email, "ana@sippulse.com");
@@ -341,7 +343,7 @@ test("call end hands off to the recorder, then its result delivers one live vCon
   await send(core, { type: "ai_session_result", meetingId: "abc-defg-hij", result: LIVE_RESULT });
 
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "sippulse_ai_live");
+  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "deepgram_live");
   const document = JSON.parse(fetch.calls[0].init.body);
   assert.equal(document.uuid, "uuid-abc-defg-hij");
   assert.deepEqual(document.parties, [{ name: "Ana", mailto: "ana@sippulse.com" }, { name: "Bruno Lima" }]);
@@ -357,7 +359,7 @@ test("call end hands off to the recorder, then its result delivers one live vCon
     { dialog: 0, intent: "commitment", intent_confidence: 0.99, sentiment: 0.5, action_item: 0.98 },
   ]);
   assert.equal(document.analysis[3].product, "jev-1.13.0");
-  assert.equal(document.attachments[0].body.transcription.model, "pulse-stt-streaming-v1");
+  assert.equal(document.attachments[0].body.transcription.model, "nova-3");
   assert.equal((await status(chrome)).state, "delivered");
   assert.deepEqual((await send(core, { type: "get_popup_state" })).activeMeetingIds, []);
   assert.equal((await send(core, { type: "get_popup_state" })).lastTranscript.hasReport, true);
@@ -382,7 +384,7 @@ test("a failed recorder result falls back to the live segments and classificatio
   await send(core, { type: "ai_session_result", meetingId: "abc-defg-hij", result: { ok: false, error: "socket lost" } });
 
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "sippulse_ai_live_recovered");
+  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "deepgram_live_recovered");
   const document = JSON.parse(fetch.calls[0].init.body);
   assert.equal(document.dialog[0].body, "Proposta até sexta.");
   assert.equal(document.analysis[0].body, "Notas ao vivo.");
@@ -443,6 +445,7 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
     policy: {
       EndpointUrl: "",
       HmacSecret: "",
+      AllowedEmailDomains: [],
       TranscriptionUrl: "",
       TranscriptionApiKey: "",
       SipPulseAiUrl: "",
@@ -488,7 +491,7 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
   assert.equal(started.ok, true);
   const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
   assert.equal(start.config.sippulseAiApiKey, "local-sp-key-1234");
-  assert.equal(start.config.transcriptionApiKey, "local-dg-key-5678");
+  assert.equal(start.config.transcription.apiKey, "local-dg-key-5678");
 });
 
 test("policy wins over local settings, and saving never overrides a policy field", async () => {
@@ -591,5 +594,88 @@ test("hosts the user has not allowed yet are reported, and the connection test s
   const tested = await send(core, { type: "test_connection" });
   assert.equal(tested.ok, false);
   assert.match(tested.error, /Allow access to https:\/\/api\.typesafe\.ai/);
+  assert.equal(fetch.calls.length, 0);
+});
+
+test("the transcript is labelled with the provider that produced it, in the header and the vCon", async () => {
+  const { core, chrome, fetch } = await setup({ policy: { TranscriptionProvider: "sippulse_ai" } });
+  await startLive(core);
+  await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
+  await send(core, {
+    type: "ai_session_result",
+    meetingId: "abc-defg-hij",
+    result: { ...LIVE_RESULT, transcription: { provider: "sippulse_ai", model: "pulse-stt-streaming-v1", language: "pt-BR" } },
+  });
+
+  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "sippulse_ai_live");
+  const document = JSON.parse(fetch.calls[0].init.body);
+  assert.equal(document.attachments[0].body.transcription_source, "sippulse_ai_live");
+  assert.equal(document.attachments[0].body.transcription.provider, "sippulse_ai");
+  assert.equal((await status(chrome)).source, "sippulse_ai_live");
+});
+
+test("the recovered vCon keeps the provider's model and language", async () => {
+  const { core, fetch } = await setup();
+  await startLive(core);
+  await send(core, {
+    type: "active_meeting_put",
+    record: {
+      ...record(),
+      liveStreamStartedAt: "2026-09-04T12:00:00.000Z",
+      liveSegments: [{ id: 1, channel: 1, speaker: null, text: "Proposta até sexta.", start: 1, end: 3, confidence: 0.9 }],
+    },
+  });
+  await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
+  await send(core, { type: "ai_session_result", meetingId: "abc-defg-hij", result: { ok: false, error: "socket lost" } });
+
+  const metadata = JSON.parse(fetch.calls[0].init.body).attachments[0].body;
+  assert.equal(metadata.transcription_source, "deepgram_live_recovered");
+  assert.deepEqual(
+    { provider: metadata.transcription.provider, model: metadata.transcription.model, language: metadata.transcription.language },
+    { provider: "deepgram", model: "nova-3", language: "multi" }
+  );
+});
+
+test("a duplicate is reported as such instead of claiming the store took this copy", async () => {
+  const { core, chrome } = await setup({ fetchResponder: () => ({ status: 200, body: { status: "duplicate" } }) });
+  await send(core, { type: "active_meeting_put", record: record() });
+  await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
+
+  const delivered = await status(chrome);
+  assert.equal(delivered.state, "delivered");
+  assert.equal(delivered.duplicate, true);
+});
+
+test("a queued vCon is retried against the endpoint and secret configured now, not the ones it was queued with", async () => {
+  const { core, chrome, fetch } = await setup({
+    fetchResponder: (url) => (url === ENDPOINT ? { status: 503 } : { status: 202 }),
+  });
+  await send(core, { type: "active_meeting_put", record: record() });
+  await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
+  const [item] = await queue(chrome);
+
+  // The store moved and its secret was rotated while the item waited.
+  const moved = "https://crm.sippulse.com/api/v2/vcons/ingest";
+  await chrome.storage.managed.set({ EndpointUrl: moved, HmacSecret: "rotated-secret" });
+  const retried = await send(core, { type: "retry_queue_item", id: item.id });
+
+  assert.equal(retried.ok, true);
+  const last = fetch.calls.at(-1);
+  assert.equal(last.url, moved);
+  assert.ok(signatureValid(last, "rotated-secret"));
+  assert.deepEqual(await queue(chrome), []);
+});
+
+test("nothing is captured or delivered until the allowed email domains are configured", async () => {
+  const { core, chrome, fetch } = await setup({ policy: { AllowedEmailDomains: [] } });
+  const popup = await send(core, { type: "get_popup_state" });
+  assert.equal(popup.config.configured, false);
+  assert.equal(popup.collaboratorAuthorized, false, "no domain is built in, so no profile is allowed");
+
+  const started = await startLive(core);
+  assert.equal(started.ok, false);
+  assert.equal(chrome._state.offscreenOpen, false);
+  const ended = await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
+  assert.equal(ended.ok, false);
   assert.equal(fetch.calls.length, 0);
 });

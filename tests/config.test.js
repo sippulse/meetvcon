@@ -19,6 +19,7 @@ test("endpoints come from configuration, must be https, and derive the provider 
   const result = config.normalize({
     EndpointUrl: "https://crm.example.com/api/vcons/ingest",
     HmacSecret: "secret",
+    AllowedEmailDomains: ["example.com"],
     TranscriptionUrl: "https://stt.example.com/",
     TranscriptionApiKey: "d",
     SipPulseAiUrl: "https://llm.example.com",
@@ -30,6 +31,7 @@ test("endpoints come from configuration, must be https, and derive the provider 
   assert.equal(result.transcription.provider, "deepgram", "provider type defaults to deepgram");
   assert.equal(result.transcription.streamBase, "wss://stt.example.com");
   assert.equal(result.transcription.apiBase, "https://stt.example.com");
+  assert.equal(result.transcription.apiKey, "d", "the key travels with the transcription settings");
   assert.equal(result.analysis.apiBase, "https://llm.example.com/v1");
   assert.equal(result.classification.apiBase, "https://ts.example.com/v1");
   assert.deepEqual([...result.origins], [
@@ -80,4 +82,29 @@ test("policy and local settings merge per field, policy first", () => {
   assert.equal(sources.SipPulseAiApiKey, "policy");
   assert.equal(sources.TypeSafeApiKey, "local");
   assert.equal(sources.EndpointUrl, "default");
+});
+
+test("capture fails closed until the allowed email domains are configured", () => {
+  const { config } = loadLibrary("src/lib/config.js");
+  const noDomains = config.normalize({ EndpointUrl: "https://crm.example.com/i", HmacSecret: "s" });
+  assert.equal(noDomains.configured, false);
+  assert.match(noDomains.error, /allowed email domains/);
+  assert.deepEqual([...noDomains.allowedEmailDomains], [], "no organization is built in");
+  assert.equal(config.isAllowedEmail("ana@sippulse.com", noDomains), false);
+
+  const withDomains = config.normalize({
+    EndpointUrl: "https://crm.example.com/i",
+    HmacSecret: "s",
+    AllowedEmailDomains: "example.com, @partner.com",
+  });
+  assert.equal(withDomains.configured, true);
+  assert.equal(config.isAllowedEmail("ana@partner.com", withDomains), true);
+  assert.equal(config.isAllowedEmail("ana@other.com", withDomains), false);
+});
+
+test("a delivery target only needs an https endpoint and a secret", () => {
+  const { config } = loadLibrary("src/lib/config.js");
+  assert.equal(config.deliveryTarget("https://crm.example.com/i", "s").ok, true);
+  assert.match(config.deliveryTarget("http://crm.example.com/i", "s").error, /https/);
+  assert.match(config.deliveryTarget("https://crm.example.com/i", "").error, /secret/);
 });
