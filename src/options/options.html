@@ -81,6 +81,14 @@
               <input name="AllowedEmailDomains" type="text" placeholder="any signed-in account when empty" />
             </label>
             <label class="field">
+              <span>When to analyse <em data-source="AnalysisMode"></em></span>
+              <select name="AnalysisMode">
+                <option value="">When the call ends (default)</option>
+                <option value="final">When the call ends</option>
+                <option value="live">During the call (notes every minute, tags per line)</option>
+              </select>
+            </label>
+            <label class="field">
               <span>Live transcription provider <em data-source="TranscriptionProvider"></em></span>
               <select name="TranscriptionProvider"></select>
             </label>

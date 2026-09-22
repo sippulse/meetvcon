@@ -272,6 +272,7 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
       streamStartedAt: "2026-09-04T12:00:00.500Z",
       analysisEnabled: true,
       classificationEnabled: true,
+      liveAnalysis: false,
     },
   });
   const popup = await send(core, { type: "get_popup_state" });

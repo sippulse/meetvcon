@@ -26,6 +26,10 @@
 
   // Streaming model choices per provider live in src/lib/transcription.js.
   const TRANSCRIPTION_PROVIDERS = Object.freeze(["deepgram", "sippulse_ai"]);
+  // "final": notes and per-line classification run once, when the call ends.
+  // "live": notes refresh during the call and each finished line is classified
+  // as it lands (tags in the panel).
+  const ANALYSIS_MODES = Object.freeze(["final", "live"]);
   const ANALYSIS = Object.freeze({
     provider: "sippulse_ai",
     model: "deepseek-v4.1-flash",
@@ -40,6 +44,7 @@
   const DEFAULT_SIPPULSE_AI_URL = "https://api.sippulse.ai";
   const DEFAULTS = Object.freeze({
     sippulseAiUrl: DEFAULT_SIPPULSE_AI_URL,
+    analysisMode: "final",
     // SipPulse AI's streaming model is in production; Deepgram is the
     // alternative for organizations that want multilingual transcription.
     transcriptionProvider: "sippulse_ai",
@@ -52,6 +57,7 @@
     "EndpointUrl",
     "HmacSecret",
     "AllowedEmailDomains",
+    "AnalysisMode",
     "TranscriptionProvider",
     "TranscriptionUrl",
     "TranscriptionApiKey",
@@ -151,6 +157,10 @@
     if (!TRANSCRIPTION_PROVIDERS.includes(provider)) {
       errors.TranscriptionProvider = `TranscriptionProvider must be one of ${TRANSCRIPTION_PROVIDERS.join(", ")}`;
     }
+    const analysisMode = text(raw.AnalysisMode) || DEFAULTS.analysisMode;
+    if (!ANALYSIS_MODES.includes(analysisMode)) {
+      errors.AnalysisMode = `AnalysisMode must be one of ${ANALYSIS_MODES.join(", ")}`;
+    }
     const store = withoutTrailingSlash(raw.EndpointUrl);
     // An invalid URL is reported, never silently replaced by the default.
     const sippulse = isSet(raw.SipPulseAiUrl) ? withoutTrailingSlash(raw.SipPulseAiUrl) : DEFAULTS.sippulseAiUrl;
@@ -200,7 +210,12 @@
         streamBase: streamBase.replace(/^https:/, "wss:"),
         apiKey: transcriptionApiKey,
       },
-      analysis: { ...ANALYSIS, apiBase: sippulse ? `${sippulse}/v1` : "" },
+      analysisMode,
+      analysis: {
+        ...ANALYSIS,
+        apiBase: sippulse ? `${sippulse}/v1` : "",
+        mode: errors.AnalysisMode ? DEFAULTS.analysisMode : analysisMode,
+      },
       classification: { ...CLASSIFICATION, apiBase: typesafe ? `${typesafe}/v1` : "" },
       // From the resolved URLs, so the default SipPulse AI host is included.
       origins: originsFor({
@@ -230,6 +245,7 @@
     DEFAULTS,
     DEFAULT_SIPPULSE_AI_URL,
     TRANSCRIPTION_PROVIDERS,
+    ANALYSIS_MODES,
     ANALYSIS,
     CLASSIFICATION,
     LOCAL_FIELDS,

@@ -20,6 +20,9 @@ const FINAL_ANALYSIS_ATTEMPTS = 2;
 const CLASSIFY_DEBOUNCE_MS = 900;
 const CLASSIFY_CONCURRENCY = 4;
 const CLASSIFY_DRAIN_MS = 8_000;
+// "final" mode classifies the whole meeting at once: ~300 ms per line, four
+// at a time, so an hour of talk fits well inside this.
+const CLASSIFY_FINAL_MS = 120_000;
 
 let session = null;
 
@@ -195,7 +198,8 @@ function handleResult(current, result) {
     if (stored.id === current.nextId) current.nextId++;
     current.words += segment.text.split(/\s+/).length;
     emit(current, { kind: "segment", segment: stored });
-    scheduleClassification(current, stored.id);
+    // In "final" mode nothing is classified until the call ends.
+    if (current.config.analysis.mode === "live") scheduleClassification(current, stored.id);
   }
   emit(current, { kind: "interim", channel: result.channel, text: "" });
 }
@@ -241,7 +245,11 @@ function scheduleClassification(current, id) {
   );
 }
 
+// During the call remote voices have no name yet; at the end they do, and
+// Jev reads better with the real name in the state.
 function speakerHint(current, segment) {
+  const resolved = current.namesBySegment?.[segment.id];
+  if (resolved) return resolved;
   return segment.channel === transcription.MIC_CHANNEL
     ? transcription.displayNameFromEmail(current.collaborator?.email)
     : transcription.UNKNOWN_REMOTE;
@@ -281,17 +289,25 @@ function pumpClassification(current) {
   }
 }
 
-// At the end of the call: classify what is still waiting, bounded in time.
-function drainClassification(current) {
+// At the end of the call: classify what is still waiting ("live" mode) or
+// every line at once ("final" mode, the default). Bounded in time either way.
+function drainClassification(current, { all = false, budgetMs = CLASSIFY_DRAIN_MS } = {}) {
+  if (!current.config.typesafeApiKey) return Promise.resolve();
   for (const [id, timer] of current.classifyTimers) {
     clearTimeout(timer);
     if (!current.classifyQueue.includes(id)) current.classifyQueue.push(id);
   }
   current.classifyTimers.clear();
+  if (all) {
+    for (const segment of current.segments) {
+      if (current.classifications[segment.id]) continue;
+      if (!current.classifyQueue.includes(segment.id)) current.classifyQueue.push(segment.id);
+    }
+  }
   pumpClassification(current);
   if (!current.classifyInFlight && !current.classifyQueue.length) return Promise.resolve();
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, CLASSIFY_DRAIN_MS);
+    const timer = setTimeout(resolve, budgetMs);
     current.classifyIdle = () => {
       clearTimeout(timer);
       resolve();
@@ -430,7 +446,7 @@ async function startCapture(message) {
     });
   });
 
-  if (current.config.sippulseAiApiKey) {
+  if (current.config.sippulseAiApiKey && current.config.analysis.mode === "live") {
     current.analysisTimer = setInterval(
       () => runLiveAnalysis(current).catch((error) => console.warn("[SipPulse Meet] live analysis", error)),
       current.config.analysis.liveIntervalMs
@@ -449,7 +465,11 @@ async function releaseAudio(current) {
 
 async function finish(current) {
   await closeStreams(current);
-  await drainClassification(current);
+  const live = current.config.analysis.mode === "live";
+  current.namesBySegment = Object.fromEntries(
+    utterancesFor(current).map((utterance) => [utterance.segment_id, utterance.speaker])
+  );
+  await drainClassification(current, live ? {} : { all: true, budgetMs: CLASSIFY_FINAL_MS });
   const utterances = utterancesFor(current);
   if (!utterances.length) {
     return { ok: false, error: "Live transcription returned no speech" };

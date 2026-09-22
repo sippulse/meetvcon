@@ -127,3 +127,21 @@ test("vCon analysis entries cover summary, insights, and speaker analytics", () 
   assert.equal(entries[1].schema, "sippulse-meet-analysis/1");
   assert.equal(entries[1].vendor, "sippulse.ai");
 });
+
+test("the report schema carries what a reader needs: headline, next step, figures, risks", () => {
+  const [, user] = analysis.buildMessages("final", { transcript: "[00:01] Ana: oi" });
+  for (const field of ["headline", "next_step", "numbers", "risks", "decisions", "action_items"]) {
+    assert.match(user.content, new RegExp(`"${field}"`), `${field} is in the schema sent to the model`);
+  }
+  const [system] = analysis.buildMessages("final", { transcript: "x" });
+  assert.match(system.content, /Keep the figures/);
+  assert.match(system.content, /Separate what was decided/);
+  assert.match(system.content, /No filler openings/i);
+});
+
+test("decisions accept the older plain-string shape and the new one", () => {
+  const older = analysis.normalize({ decisions: ["Piloto em outubro", ""] });
+  assert.deepEqual(plain(older.decisions), [{ decision: "Piloto em outubro", rationale: "" }]);
+  const newer = analysis.normalize({ decisions: [{ decision: "Dez por cento", rationale: "margem" }] });
+  assert.deepEqual(plain(newer.decisions), [{ decision: "Dez por cento", rationale: "margem" }]);
+});

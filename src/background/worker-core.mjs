@@ -288,6 +288,7 @@ export function createWorkerCore({
       streamStartedAt,
       analysisEnabled: config.analysisReady,
       classificationEnabled: config.classificationReady,
+      liveAnalysis: config.analysis.mode === "live",
     });
     return { ok: true };
   }
@@ -876,6 +877,7 @@ export function createWorkerCore({
         transcriptionProvider: config.transcription.provider,
         analysisReady: config.analysisReady,
         classificationReady: config.classificationReady,
+        analysisMode: config.analysis.mode,
         error: config.error,
       },
       status,

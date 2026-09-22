@@ -33,6 +33,9 @@
   let locked = false;
   let audioActive = false;
   let analysisEnabled = false;
+  // "live": notes refresh during the call and lines get tags. Otherwise
+  // everything is written once, when the call ends.
+  let liveAnalysis = false;
   let classificationEnabled = false;
   let collaborator = null;
   let activeTab = "transcript";
@@ -244,13 +247,15 @@
     if (!notes) {
       const message = !audioActive
         ? "AI notes need live transcription. Click the SipPulse extension button to start it."
-        : analysisEnabled
+        : !analysisEnabled
+        ? "AI notes are not configured. The transcript is still captured."
+        : liveAnalysis
         ? "Notes appear about a minute after people start talking."
-        : "AI notes are not configured by SipPulse. The transcript is still captured.";
+        : "Notes, action items and intents are written when the call ends, and go to the vCon and your email.";
       container.append(el("p", "meetvcon-empty", message));
       const error = live?.status?.analysis_status?.error;
       if (error && audioActive) container.append(el("p", "meetvcon-muted", `Last attempt: ${error}`));
-      if (classificationEnabled) renderIntents(container);
+      if (classificationEnabled && liveAnalysis) renderIntents(container);
       return;
     }
     if (notes.summary) {
@@ -368,6 +373,7 @@
   function setAudioActive(active, options = {}) {
     audioActive = !!active;
     if ("analysisEnabled" in options) analysisEnabled = !!options.analysisEnabled;
+    if ("liveAnalysis" in options) liveAnalysis = !!options.liveAnalysis;
     if ("classificationEnabled" in options) classificationEnabled = !!options.classificationEnabled;
     if (document.getElementById(PANEL_ID)) scheduleRender();
   }

@@ -139,3 +139,13 @@ test("a delivery target only needs an https endpoint and a secret", () => {
   assert.match(config.deliveryTarget("http://crm.example.com/i", "s").error, /https/);
   assert.match(config.deliveryTarget("https://crm.example.com/i", "").error, /secret/);
 });
+
+test("analysis runs at the end of the call unless the mode says otherwise", () => {
+  const { config } = loadLibrary("src/lib/config.js");
+  assert.equal(config.normalize({}).analysis.mode, "final", "nothing calls the models during a call by default");
+  assert.equal(config.normalize({ AnalysisMode: "live" }).analysis.mode, "live");
+
+  const bogus = config.normalize({ AnalysisMode: "sometimes" });
+  assert.match(bogus.errors.AnalysisMode, /final, live/);
+  assert.equal(bogus.analysis.mode, "final", "an unknown mode falls back to the safe one");
+});

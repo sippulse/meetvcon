@@ -5,17 +5,17 @@ vCon store (`EndpointUrl`). No endpoint is built in; the hosts below are
 SipPulse's deployment. SipPulse's store lives inside the CRM,
 `POST https://crm.sippulse.com/api/vcons/ingest`, implemented in the
 `sippulse-website` repository
-(`src/app/api/vcons/ingest/route.ts`, `src/lib/vcon-ingest.ts`). Transcription,
-classification, and meeting analysis happen during the call, so the store
-never receives audio.
+(`src/app/api/vcons/ingest/route.ts`, `src/lib/vcon-ingest.ts`). Transcription
+happens during the call and classification and analysis by the time it ends,
+so the store never receives audio.
 
 ## Where each step runs
 
 | Step | Where (SipPulse's configuration) | Credential |
 |---|---|---|
 | Live transcription | Offscreen document → the transcription base as `wss://…/v1/listen`, one mono linear16 WebSocket for the microphone and one for the Meet tab. `sippulse_ai` (current, default): `wss://api.sippulse.ai`, `pulse-stt-streaming-v1`, pt-BR, 8 kHz, `endpointing=700`. `deepgram` (optional): `wss://api.deepgram.com`, nova-3, `language=multi`, 16 kHz, diarized, `mip_opt_out` | the transcription key (defaults to `SipPulseAiApiKey`), sent as `Sec-WebSocket-Protocol: token, <key>` |
-| Inline classification | Offscreen document → TypeSafe `POST https://api.typesafe.ai/v1/systemone` (`jev-latest`) once per final transcript segment: intent (Choice), sentiment (Score 0–4), action item (Noul) | `TypeSafeApiKey` policy, `Authorization: Bearer` |
-| Live notes and final report | Offscreen document → SipPulse AI `POST https://api.sippulse.ai/v1/openai/chat/completions` (`deepseek-v4.1-flash`, JSON schema) | `SipPulseAiApiKey` policy, `api-key` header |
+| Classification | Offscreen document → TypeSafe `POST https://api.typesafe.ai/v1/systemone` (`jev-latest`) once per final transcript segment: intent (Choice), sentiment (Score 0–4), action item (Noul). With `AnalysisMode: "final"` (default) the whole transcript is classified in one batch when the call ends; with `live`, each segment is classified as it arrives | `TypeSafeApiKey` policy, `Authorization: Bearer` |
+| Notes and final report | Offscreen document → SipPulse AI `POST https://api.sippulse.ai/v1/openai/chat/completions` (`deepseek-v4.1-flash`, JSON schema). Once when the call ends, plus about once a minute during the call when `AnalysisMode` is `live` | `SipPulseAiApiKey` policy, `api-key` header |
 | vCon store (CRM) | Service worker → `https://crm.sippulse.com/api/vcons/ingest` | `HmacSecret` (the CRM's `VCON_HMAC_SECRET`), `X-MeetVcon-Signature` |
 
 SipPulse streams to its own gateway in production, so **one key
@@ -96,12 +96,16 @@ proves the secret is right, `401` that it is wrong, and nothing is stored.
 - `analysis[]` (live sources, when available):
   - `type: "summary"`, `encoding: "none"`, `body`: summary text.
   - `type: "meeting_insights"`, `encoding: "json"`,
-    `schema: "sippulse-meet-analysis/1"`, `body`: `{ language, title, summary,
-    key_points[], topics[{title,start,summary}], action_items[{owner,task,due}],
-    decisions[], open_questions[], intents[{speaker,intent,detail,at,confidence}],
+    `schema: "sippulse-meet-analysis/1"`, `body`: `{ language, title, headline,
+    summary, key_points[], decisions[{decision,rationale}],
+    action_items[{owner,task,due}], next_step,
+    numbers[{label,value,context}], risks[], open_questions[],
+    topics[{title,start,summary}],
+    intents[{speaker,intent,detail,at,confidence}],
     sentiment[{speaker,label,score,note}], generated_at }`. The narrative fields
     come from the LLM; `intents` and `sentiment` are aggregated from the Jev
-    classifications.
+    classifications. `decisions` was a list of plain strings before this
+    revision; readers should accept both shapes.
   - `type: "speaker_analytics"`, `encoding: "json"`,
     `schema: "sippulse-speaker-stats/1"`, `body`: `[{ speaker, talk_seconds,
     talk_share, words, turns, longest_turn_seconds, questions,
@@ -115,8 +119,9 @@ proves the secret is right, `401` that it is wrong, and nothing is stored.
     `purchase_interest`, `problem_report`, `scheduling`, `information`,
     `small_talk`.
 
-The email should lead with the summary and action items, then decisions,
-topics, intents, speaker talk time, and the transcript. `vcon.toMarkdown()` in
+The email should lead with the headline and summary, then action items and
+the next step, decisions, figures, risks, topics, intents, speaker talk time,
+and the transcript. `vcon.toMarkdown()` in
 `src/lib/vcon.js` renders exactly that layout and can be used as the
 reference.
 
@@ -137,16 +142,12 @@ retry time**, so rotating either one does not strand the outbox.
 
 These are CRM changes, not extension changes:
 
-1. **Every captured meeting is flagged internal.** Google Meet does not expose
-   participant emails, so only the collaborator's party has a `mailto`
-   (`@sippulse.com`), and `isInternalMeeting` sees "all emails are
-   SipPulse". Customer meetings then stay out of the company views and get no
-   company suggestion. Parties without `mailto` should make a meeting
-   *not internal* (or unknown).
-2. **The email ignores the extension's report.** The CRM runs a second LLM
-   pass and emails only its own summary and the transcript. It could use the
-   `meeting_insights` entry (summary, action items, decisions, intents) and
-   `speaker_analytics` when present, and skip the second pass.
+Both gaps listed here previously are now closed in `sippulse-website`:
+`isInternalMeeting` requires every party to carry an `@sippulse.com` mailto,
+and the email renders the extension's own report (`src/lib/vcon-report.ts`)
+instead of a second LLM pass, including `headline`, `next_step`, `numbers` and
+`risks`. That renderer accepts `decisions` as objects or as the plain strings
+older versions of the extension sent.
 
 ## Verifying against the real services
 

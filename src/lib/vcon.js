@@ -132,6 +132,7 @@
       lines.push(`## ${title}`, "", ...items, "");
     };
     if (insights) {
+      if (insights.headline) lines.push(`> ${insights.headline}`, "");
       if (insights.summary) lines.push("## Summary", "", insights.summary, "");
       section("Key points", (insights.key_points || []).map((point) => `- ${point}`));
       section(
@@ -141,7 +142,23 @@
             `- [ ] ${item.task}${item.owner ? ` — **${item.owner}**` : ""}${item.due ? ` (${item.due})` : ""}`
         )
       );
-      section("Decisions", (insights.decisions || []).map((decision) => `- ${decision}`));
+      if (insights.next_step) lines.push("## Next step", "", insights.next_step, "");
+      section(
+        "Decisions",
+        // Decisions used to be plain strings.
+        (insights.decisions || []).map((decision) =>
+          typeof decision === "string"
+            ? `- ${decision}`
+            : `- ${decision.decision}${decision.rationale ? ` — ${decision.rationale}` : ""}`
+        )
+      );
+      section(
+        "Figures",
+        (insights.numbers || []).map(
+          (number) => `- **${number.label}:** ${number.value}${number.context ? ` — ${number.context}` : ""}`
+        )
+      );
+      section("Risks and objections", (insights.risks || []).map((risk) => `- ${risk}`));
       section(
         "Topics",
         (insights.topics || []).map(

@@ -25,23 +25,28 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
    streams to the configured `/v1/listen` provider — the SipPulse AI streaming
    gateway (`pulse-stt-streaming-v1`, pt-BR) by default, or Deepgram nova-3
    (multilingual, diarized) — and the panel stays visible throughout.
-4. When TypeSafe is configured, every final transcript line is classified inline by TypeSafe's Jev model
-   (intent, sentiment, action item) within about a second and tagged in the
-   live transcript.
-5. The in-call panel shows the live transcript (with interim text and intent
-   tags), AI notes refreshed about every minute, and per-speaker talk time and
-   sentiment. Remote speakers are named from Meet captions when possible.
-6. When the call ends, the full transcript is analyzed once more by SipPulse
-   AI (`deepseek-v4.1-flash`) to produce the final report: summary, key
-   points, topics with times, action items with owners, decisions, and open
-   questions, combined with the Jev intents and sentiment per speaker.
+4. `AnalysisMode` decides when the models run. The default, `final`, keeps the
+   call itself free of model calls: nothing is classified or summarized until
+   the meeting ends. `live` additionally classifies every transcript line with
+   TypeSafe's Jev model (intent, sentiment, action item) within about a second
+   and refreshes the notes about every minute.
+5. The in-call panel shows the live transcript, per-speaker talk time, and — in
+   `live` mode — intent tags and running notes. Remote speakers are named from
+   Meet captions when possible.
+6. When the call ends, the full transcript is analyzed by SipPulse AI
+   (`deepseek-v4.1-flash`) into the final report: headline, summary, key
+   points, decisions with their rationale, action items with owners and due
+   dates, the agreed next step, the figures that were quoted, open risks and
+   objections, open questions, and topics with times. When TypeSafe is
+   configured, every line not already classified is classified then, and the
+   Jev intents and per-speaker sentiment are merged into the report.
 7. The final vCon preserves one UUID, maps speakers to `parties[]`, maps timed
    utterances to `dialog[]`, carries the report and speaker stats in
    `analysis[]`, and identifies the collaborator in meeting metadata.
 8. Final processing stores/upserts one CRM vCon and queues exactly one email to
    the collaborator. During the call, transcript text leaves the browser only
    to SipPulse AI (notes) and TypeSafe (classification).
-9. “Stop and discard” stops captions, audio, and live analysis, removes
+9. “Stop and discard” stops captions, audio, and any analysis, removes
    recovery data, and prevents delivery for that call, including after a tab
    reload. The marker clears when the collaborator leaves the call or after
    four hours.
@@ -52,7 +57,8 @@ Only three values are required: `SipPulseAiApiKey` (live transcription and
 notes) and the vCon store (`EndpointUrl`, `HmacSecret`). Everything else is
 optional: `SipPulseAiUrl` (defaults to `https://api.sippulse.ai`, the only
 built-in endpoint), `AllowedEmailDomains` (unset, any signed-in profile may
-capture), a transcription override (`TranscriptionProvider`,
+capture), `AnalysisMode` (`final` by default, or `live`), a transcription
+override (`TranscriptionProvider`,
 `TranscriptionUrl`, `TranscriptionApiKey`, defaulting to the SipPulse AI
 pair), and TypeSafe (`TypeSafeUrl`, `TypeSafeApiKey`, no default). The vCon
 store has no default: it is always the organization's own. Configured hosts are optional

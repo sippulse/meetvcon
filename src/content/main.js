@@ -62,6 +62,7 @@
     inCallPanel.setAudioActive(!!live, {
       analysisEnabled: state.config.analysisReady,
       classificationEnabled: state.config.classificationReady,
+      liveAnalysis: state.config.analysisMode === "live",
     });
   }
 
@@ -130,6 +131,7 @@
       inCallPanel.setAudioActive(!!message.active, {
         analysisEnabled: message.analysisEnabled,
         classificationEnabled: message.classificationEnabled,
+        liveAnalysis: message.liveAnalysis,
       });
     } else if (message.type === "live_update") {
       transcriptCapture.applyLiveUpdate(message.update);

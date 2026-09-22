@@ -126,8 +126,10 @@ async function main() {
     );
 
     const collaborator = { email: "ana.souza@sippulse.com" };
+    // Default to the shipped mode: analyse once, when the call ends.
+    const analysisMode = process.env.E2E_ANALYSIS_MODE === "live" ? "live" : "final";
     const started = await page.evaluate(
-      async ({ keys, collaborator }) => {
+      async ({ keys, collaborator, analysisMode }) => {
         const config = window.MeetVcon.config.normalize({
           TranscriptionProvider: keys.transcriptionProvider,
           TranscriptionUrl: keys.transcriptionUrl,
@@ -150,15 +152,15 @@ async function main() {
             sippulseAiApiKey: keys.sippulse,
             typesafeApiKey: keys.typesafe,
             transcription: config.transcription,
-            // A short meeting still gets live notes.
-            analysis: { ...config.analysis, liveIntervalMs: 15_000 },
+            // A short meeting still gets live notes when asked for them.
+            analysis: { ...config.analysis, mode: analysisMode, liveIntervalMs: 15_000 },
             classification: config.classification,
           },
         });
         window.__play();
         return response;
       },
-      { keys, collaborator }
+      { keys, collaborator, analysisMode }
     );
     if (!started.ok) throw new Error(`start failed: ${started.error}`);
 
@@ -200,17 +202,23 @@ function report(messages) {
     const tag = result.classifications?.[utterance.segment_id]?.intent || "-";
     console.log(`  ${utterance.speaker.padEnd(11)} ${tag.padEnd(18)} ${utterance.text}`);
   }
-  if (result.analysis) {
-    console.log(`summary: ${result.analysis.summary}`);
-    for (const item of result.analysis.action_items) console.log(`  action: ${item.task} — ${item.owner} (${item.due})`);
-    for (const decision of result.analysis.decisions) console.log(`  decision: ${decision}`);
+  const analysis = result.analysis;
+  if (analysis) {
+    console.log(`headline: ${analysis.headline}`);
+    console.log(`summary: ${analysis.summary}`);
+    for (const item of analysis.action_items) console.log(`  action: ${item.task} — ${item.owner} (${item.due})`);
+    for (const entry of analysis.decisions) console.log(`  decision: ${entry.decision}${entry.rationale ? ` (${entry.rationale})` : ""}`);
+    for (const figure of analysis.numbers) console.log(`  figure: ${figure.label} = ${figure.value}`);
+    for (const risk of analysis.risks) console.log(`  risk: ${risk}`);
+    if (analysis.next_step) console.log(`next step: ${analysis.next_step}`);
   }
   const passed =
     result.ok &&
     result.utterances.some((u) => u.channel === "microphone") &&
     result.utterances.some((u) => u.speaker === "Bruno Lima") &&
     Object.keys(result.classifications || {}).length > 0 &&
-    !!result.analysis?.summary;
+    !!analysis?.summary &&
+    !!analysis?.headline;
   console.log(passed ? "PASS" : "FAIL");
   return passed;
 }

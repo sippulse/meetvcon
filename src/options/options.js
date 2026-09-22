@@ -134,11 +134,12 @@ async function refresh() {
   elements.provider.textContent = state.config.liveTranscriptionReady
     ? `${provider ? provider.label : state.config.transcriptionProvider} (Google captions fallback)`
     : "Google captions only (transcription URL and key not configured)";
+  const when = state.config.analysisMode === "live" ? "during the call" : "when the call ends";
   elements.notes.textContent = state.config.analysisReady
-    ? "SipPulse AI"
+    ? `SipPulse AI, ${when}`
     : "Off (SipPulse AI URL and key not configured)";
   elements.classification.textContent = state.config.classificationReady
-    ? "TypeSafe Jev (intent, sentiment, action items)"
+    ? `TypeSafe Jev (intent, sentiment, action items), ${when}`
     : "Off (TypeSafe URL and key not configured)";
   elements.accept.classList.toggle("hidden", state.consented);
   elements.revoke.classList.toggle("hidden", !state.consented);

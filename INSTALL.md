@@ -29,10 +29,11 @@ Each setting is read from two places, field by field:
 |---|---|
 | `SipPulseAiUrl` | HTTPS base of SipPulse AI. Defaults to `https://api.sippulse.ai` |
 | `AllowedEmailDomains` | Restrict which Chrome profiles may capture, e.g. `["sippulse.com"]`. Unset, any signed-in profile may |
+| `AnalysisMode` | `final` (default) analyses once, when the call ends. `live` also analyses during the call: notes every minute and a tag per line, at a higher cost |
 | `TranscriptionProvider` | `sippulse_ai` (default; pt-BR) or `deepgram` (nova-3, multilingual, diarized) |
 | `TranscriptionUrl` | Only to transcribe somewhere other than SipPulse AI, e.g. `https://api.deepgram.com`. Defaults to the SipPulse AI URL |
 | `TranscriptionApiKey` | Key for `TranscriptionUrl`. Defaults to `SipPulseAiApiKey` |
-| `TypeSafeUrl` + `TypeSafeApiKey` | Inline intent tags with TypeSafe Jev, e.g. `https://api.typesafe.ai`. No default: tags are off unless set |
+| `TypeSafeUrl` + `TypeSafeApiKey` | Intent, sentiment and action-item classification with TypeSafe Jev, e.g. `https://api.typesafe.ai`. No default: classification is off unless set |
 | `CaptureEnabled` | `false` disables capture (policy only) |
 
 The only endpoint built into the extension is SipPulse AI's public API, as
@@ -126,7 +127,7 @@ to a configured machine, whether they came from policy or local settings:
 
 - Create a dedicated SipPulse AI key for Meet Capture with a spending
   limit, and rotate it on a schedule.
-- If you enable inline tags, create a dedicated TypeSafe key.
+- If you enable classification, create a dedicated TypeSafe key.
 - The HMAC secret is shared by every enrolled machine and the CRM; anyone who
   reads it can post vCons to the CRM. Rotate it on the CRM
   (`VCON_HMAC_SECRET`) and in policy together, and replace it with SipPulse
@@ -171,7 +172,7 @@ discard behavior have passed the pilot checklist.
    on", your lines appear under your name, and remote lines under their Meet
    names within about two seconds. Within another second, lines get tags
    such as "question" or "commitment".
-6. After about a minute of conversation the Notes tab shows a summary and
+6. With `AnalysisMode: "live"`, after about a minute of conversation the Notes tab shows a summary and
    action items; the Speakers tab shows talk time and sentiment.
 7. Toggle Wi-Fi off for ~20 seconds and back on; the panel reports
    reconnecting and the transcript resumes with correct timestamps.
