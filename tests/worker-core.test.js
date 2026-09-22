@@ -280,11 +280,20 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   assert.equal(popup.status.source, "deepgram_live");
 });
 
-test("live capture is refused when the transcription key is not configured", async () => {
-  const { core, chrome } = await setup({ policy: { TranscriptionApiKey: "" } });
+test("without its own key, transcription falls back to the SipPulse AI one; with neither, capture is refused", async () => {
+  const inherited = await setup({ policy: { TranscriptionUrl: "", TranscriptionApiKey: "", TranscriptionProvider: "" } });
+  assert.equal((await startLive(inherited.core)).ok, true);
+  const start = inherited.chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
+  assert.equal(start.config.transcription.streamBase, "wss://api.sippulse.ai");
+  assert.equal(start.config.transcription.apiKey, "sp-key");
+  assert.equal(start.config.transcription.provider, "sippulse_ai");
+
+  const { core, chrome } = await setup({
+    policy: { TranscriptionUrl: "", TranscriptionApiKey: "", SipPulseAiUrl: "", SipPulseAiApiKey: "" },
+  });
   const result = await startLive(core);
   assert.equal(result.ok, false);
-  assert.match(result.error, /not configured/);
+  assert.match(result.error, /SipPulse AI key/, "the error names what is missing");
   assert.equal(chrome._state.offscreenOpen, false);
 });
 
@@ -666,16 +675,44 @@ test("a queued vCon is retried against the endpoint and secret configured now, n
   assert.deepEqual(await queue(chrome), []);
 });
 
-test("nothing is captured or delivered until the allowed email domains are configured", async () => {
-  const { core, chrome, fetch } = await setup({ policy: { AllowedEmailDomains: [] } });
-  const popup = await send(core, { type: "get_popup_state" });
-  assert.equal(popup.config.configured, false);
-  assert.equal(popup.collaboratorAuthorized, false, "no domain is built in, so no profile is allowed");
+test("without allowed domains any signed-in profile captures; with them, other domains are refused", async () => {
+  const open = await setup({ policy: { AllowedEmailDomains: [] }, chromeOptions: { email: "ana@anywhere.com" } });
+  const popup = await send(open.core, { type: "get_popup_state" });
+  assert.equal(popup.config.configured, true);
+  assert.equal(popup.collaboratorAuthorized, true);
+  assert.equal((await startLive(open.core)).ok, true);
 
+  const { core, chrome, fetch } = await setup({ chromeOptions: { email: "ana@anywhere.com" } });
+  assert.equal((await send(core, { type: "get_popup_state" })).collaboratorAuthorized, false);
   const started = await startLive(core);
   assert.equal(started.ok, false);
   assert.equal(chrome._state.offscreenOpen, false);
   const ended = await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
   assert.equal(ended.ok, false);
   assert.equal(fetch.calls.length, 0);
+});
+
+test("the minimal configuration is the SipPulse AI key and the vCon store", async () => {
+  const { core, chrome } = await setup({
+    policy: {
+      AllowedEmailDomains: [],
+      TranscriptionProvider: "",
+      TranscriptionUrl: "",
+      TranscriptionApiKey: "",
+      SipPulseAiUrl: "",
+      TypeSafeUrl: "",
+      TypeSafeApiKey: "",
+    },
+  });
+  const popup = await send(core, { type: "get_popup_state" });
+  assert.equal(popup.config.configured, true);
+  assert.equal(popup.config.liveTranscriptionReady, true);
+  assert.equal(popup.config.analysisReady, true);
+  assert.equal(popup.config.classificationReady, false);
+
+  assert.equal((await startLive(core)).ok, true);
+  const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
+  assert.equal(start.config.transcription.streamBase, "wss://api.sippulse.ai");
+  assert.equal(start.config.transcription.apiKey, "sp-key");
+  assert.equal(start.config.analysis.apiBase, "https://api.sippulse.ai/v1");
 });

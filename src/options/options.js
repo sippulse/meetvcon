@@ -54,7 +54,11 @@ function renderSettings(fields) {
     const shown = Array.isArray(field.value) ? field.value.join(", ") : field.value || "";
     if (SECRET_FIELDS.has(name)) {
       input.value = "";
-      input.placeholder = shown ? `Stored ${shown}` : "Not set";
+      input.placeholder = shown
+        ? `Stored ${shown}`
+        : name === "TranscriptionApiKey"
+        ? "defaults to the SipPulse AI key"
+        : "Not set";
     } else {
       input.value = shown;
     }
@@ -75,7 +79,9 @@ function originsInForm() {
   const fields = Object.fromEntries(
     configLib.URL_FIELDS.map((field) => [field, elements.settingsForm.elements[field].value.trim()])
   );
-  return configLib.originsFor(fields);
+  // normalize() applies the defaults (e.g. the SipPulse AI URL) before the
+  // hosts are derived, so an empty field still asks for the right host.
+  return configLib.normalize(fields).origins;
 }
 
 async function requestAccess(origins) {

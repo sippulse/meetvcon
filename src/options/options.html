@@ -59,6 +59,10 @@
         </p>
         <form id="settingsForm" autocomplete="off">
           <label class="field">
+            <span>SipPulse AI API key <em data-source="SipPulseAiApiKey"></em></span>
+            <input name="SipPulseAiApiKey" type="password" />
+          </label>
+          <label class="field">
             <span>vCon store endpoint <em data-source="EndpointUrl"></em></span>
             <input name="EndpointUrl" type="url" placeholder="https://crm.example.com/api/vcons/ingest" />
           </label>
@@ -66,38 +70,37 @@
             <span>vCon store HMAC secret <em data-source="HmacSecret"></em></span>
             <input name="HmacSecret" type="password" />
           </label>
-          <label class="field">
-            <span>Allowed email domains <em data-source="AllowedEmailDomains"></em></span>
-            <input name="AllowedEmailDomains" type="text" placeholder="example.com, partner.com" />
-          </label>
-          <label class="field">
-            <span>Live transcription provider <em data-source="TranscriptionProvider"></em></span>
-            <select name="TranscriptionProvider"></select>
-          </label>
-          <label class="field">
-            <span>Live transcription URL <em data-source="TranscriptionUrl"></em></span>
-            <input name="TranscriptionUrl" type="url" placeholder="https://api.deepgram.com" />
-          </label>
-          <label class="field">
-            <span>Live transcription API key <em data-source="TranscriptionApiKey"></em></span>
-            <input name="TranscriptionApiKey" type="password" />
-          </label>
-          <label class="field">
-            <span>SipPulse AI URL (notes) <em data-source="SipPulseAiUrl"></em></span>
-            <input name="SipPulseAiUrl" type="url" placeholder="https://api.sippulse.ai" />
-          </label>
-          <label class="field">
-            <span>SipPulse AI API key <em data-source="SipPulseAiApiKey"></em></span>
-            <input name="SipPulseAiApiKey" type="password" />
-          </label>
-          <label class="field">
-            <span>TypeSafe URL <em data-source="TypeSafeUrl"></em></span>
-            <input name="TypeSafeUrl" type="url" placeholder="https://api.typesafe.ai" />
-          </label>
-          <label class="field">
-            <span>TypeSafe API key <em data-source="TypeSafeApiKey"></em></span>
-            <input name="TypeSafeApiKey" type="password" />
-          </label>
+          <details class="optional">
+            <summary>Optional settings</summary>
+            <label class="field">
+              <span>SipPulse AI URL <em data-source="SipPulseAiUrl"></em></span>
+              <input name="SipPulseAiUrl" type="url" placeholder="https://api.sippulse.ai (default)" />
+            </label>
+            <label class="field">
+              <span>Allowed email domains <em data-source="AllowedEmailDomains"></em></span>
+              <input name="AllowedEmailDomains" type="text" placeholder="any signed-in account when empty" />
+            </label>
+            <label class="field">
+              <span>Live transcription provider <em data-source="TranscriptionProvider"></em></span>
+              <select name="TranscriptionProvider"></select>
+            </label>
+            <label class="field">
+              <span>Live transcription URL <em data-source="TranscriptionUrl"></em></span>
+              <input name="TranscriptionUrl" type="url" placeholder="defaults to the SipPulse AI URL" />
+            </label>
+            <label class="field">
+              <span>Live transcription API key <em data-source="TranscriptionApiKey"></em></span>
+              <input name="TranscriptionApiKey" type="password" placeholder="defaults to the SipPulse AI key" />
+            </label>
+            <label class="field">
+              <span>TypeSafe URL (inline intent tags) <em data-source="TypeSafeUrl"></em></span>
+              <input name="TypeSafeUrl" type="url" placeholder="https://api.typesafe.ai" />
+            </label>
+            <label class="field">
+              <span>TypeSafe API key <em data-source="TypeSafeApiKey"></em></span>
+              <input name="TypeSafeApiKey" type="password" />
+            </label>
+          </details>
           <p id="access" class="hint hidden">
             <span id="accessText"></span>
             <button id="grantAccess" type="button" class="secondary">Allow access</button>

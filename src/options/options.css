@@ -112,6 +112,16 @@ a {
   font-size: 13px;
 }
 
+.optional {
+  margin-top: 18px;
+}
+
+.optional summary {
+  color: #263238;
+  cursor: pointer;
+  font-weight: 650;
+}
+
 .hint {
   color: #65717d;
   font-size: 13px;

@@ -22,11 +22,10 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
    in the encrypted local recovery record until final delivery.
 3. The collaborator starts live transcription with one extension action. The
    Meet tab (remote participants) and local microphone stream as separate mono
-   streams to the configured `/v1/listen` provider — Deepgram nova-3
-   (multilingual, diarized) today, or the SipPulse AI streaming gateway
-   (`pulse-stt-streaming-v1`, pt-BR) — and the panel stays visible
-   throughout.
-4. Every final transcript line is classified inline by TypeSafe's Jev model
+   streams to the configured `/v1/listen` provider — the SipPulse AI streaming
+   gateway (`pulse-stt-streaming-v1`, pt-BR) by default, or Deepgram nova-3
+   (multilingual, diarized) — and the panel stays visible throughout.
+4. When TypeSafe is configured, every final transcript line is classified inline by TypeSafe's Jev model
    (intent, sentiment, action item) within about a second and tagged in the
    live transcript.
 5. The in-call panel shows the live transcript (with interim text and intent
@@ -49,13 +48,14 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
 
 ## Configuration
 
-No endpoint and no email domain are built in (open source). Settings are the vCon store
-(`EndpointUrl`, `HmacSecret`), email scope
-(`AllowedEmailDomains`), live transcription (`TranscriptionProvider`,
-`TranscriptionUrl`, `TranscriptionApiKey`), SipPulse AI notes
-(`SipPulseAiUrl`, `SipPulseAiApiKey`),
-and TypeSafe (`TypeSafeUrl`, `TypeSafeApiKey`). `AllowedEmailDomains` is
-required; with none set, no profile may capture. Configured hosts are optional
+Only three values are required: `SipPulseAiApiKey` (live transcription and
+notes) and the vCon store (`EndpointUrl`, `HmacSecret`). Everything else is
+optional: `SipPulseAiUrl` (defaults to `https://api.sippulse.ai`, the only
+built-in endpoint), `AllowedEmailDomains` (unset, any signed-in profile may
+capture), a transcription override (`TranscriptionProvider`,
+`TranscriptionUrl`, `TranscriptionApiKey`, defaulting to the SipPulse AI
+pair), and TypeSafe (`TypeSafeUrl`, `TypeSafeApiKey`, no default). The vCon
+store has no default: it is always the organization's own. Configured hosts are optional
 host permissions granted at runtime, which Chrome grants only from a user
 action: each collaborator allows them once from the options page, even when
 every value comes from Google Admin. They come

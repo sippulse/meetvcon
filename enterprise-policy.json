@@ -1,19 +1,29 @@
 {
   "type": "object",
   "properties": {
+    "SipPulseAiApiKey": {
+      "title": "SipPulse AI API key (notes)",
+      "description": "Required. SipPulse AI key; covers live transcription and meeting notes. Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "type": "string"
+    },
     "EndpointUrl": {
       "title": "vCon store endpoint",
-      "description": "Required. HTTPS URL that receives the final vCon (for SipPulse: the CRM's /api/vcons/ingest).",
+      "description": "Required. HTTPS URL of the vCon store that receives the final vCon (SipPulse: https://crm.sippulse.com/api/vcons/ingest).",
       "type": "string"
     },
     "HmacSecret": {
       "title": "vCon store HMAC secret",
-      "description": "The CRM's VCON_HMAC_SECRET. Every delivery is signed with X-MeetVcon-Signature: sha256=<HMAC-SHA256 of the body>.",
+      "description": "Required. The vCon store's shared secret (SipPulse CRM: VCON_HMAC_SECRET). Every delivery is signed with X-MeetVcon-Signature: sha256=<HMAC-SHA256 of the body>.",
+      "type": "string"
+    },
+    "SipPulseAiUrl": {
+      "title": "SipPulse AI base URL (notes)",
+      "description": "Optional. HTTPS base of the SipPulse AI API. Defaults to https://api.sippulse.ai.",
       "type": "string"
     },
     "AllowedEmailDomains": {
       "title": "Allowed collaborator email domains",
-      "description": "Chrome profile email domains allowed to capture and receive the transcript email. Defaults to sippulse.com.",
+      "description": "Optional. Chrome profile email domains allowed to capture, e.g. [\"sippulse.com\"]. Unset, any signed-in profile may capture.",
       "type": "array",
       "items": {
         "type": "string"
@@ -21,7 +31,7 @@
     },
     "TranscriptionProvider": {
       "title": "Live transcription provider",
-      "description": "deepgram (nova-3, multilingual, diarized) or sippulse_ai (SipPulse AI streaming gateway, pt-BR). Both speak the /v1/listen protocol. Defaults to deepgram.",
+      "description": "Optional. sippulse_ai (default; pt-BR) or deepgram (nova-3, multilingual, diarized).",
       "type": "string",
       "enum": [
         "deepgram",
@@ -30,32 +40,22 @@
     },
     "TranscriptionUrl": {
       "title": "Live transcription base URL",
-      "description": "HTTPS base of the provider, e.g. https://api.deepgram.com; the WebSocket is <base as wss>/v1/listen.",
+      "description": "Optional. Only to transcribe somewhere other than SipPulse AI, e.g. https://api.deepgram.com. Defaults to the SipPulse AI URL.",
       "type": "string"
     },
     "TranscriptionApiKey": {
       "title": "Live transcription API key",
-      "description": "Key for the transcription provider (Deepgram: a usage:write key). Readable on every enrolled machine: use a dedicated, rotatable key.",
-      "type": "string"
-    },
-    "SipPulseAiUrl": {
-      "title": "SipPulse AI base URL (notes)",
-      "description": "HTTPS base of the SipPulse AI API used for live notes and the final report (.../v1/openai/chat/completions), e.g. https://api.sippulse.ai.",
-      "type": "string"
-    },
-    "SipPulseAiApiKey": {
-      "title": "SipPulse AI API key (notes)",
-      "description": "Key for the same environment as SipPulseAiUrl. Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "description": "Optional. Key for TranscriptionUrl. Defaults to SipPulseAiApiKey.",
       "type": "string"
     },
     "TypeSafeUrl": {
       "title": "TypeSafe base URL",
-      "description": "HTTPS base of the TypeSafe API (.../v1/systemone).",
+      "description": "Optional. HTTPS base of TypeSafe (.../v1/systemone) for inline intent tags. No default: tags are off unless set.",
       "type": "string"
     },
     "TypeSafeApiKey": {
-      "title": "TypeSafe API key (pilot)",
-      "description": "Enables inline per-utterance classification (intent, sentiment, action items) with the Jev model. Readable on every enrolled machine: use a dedicated, rotatable key.",
+      "title": "TypeSafe API key",
+      "description": "Optional. Key for TypeSafeUrl.",
       "type": "string"
     },
     "CaptureEnabled": {

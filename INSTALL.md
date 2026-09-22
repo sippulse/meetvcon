@@ -15,23 +15,30 @@ Each setting is read from two places, field by field:
 
 | Field | Meaning |
 |---|---|
-| `EndpointUrl` | Required. HTTPS URL of the vCon store. SipPulse: `https://crm.sippulse.com/api/vcons/ingest` |
-| `HmacSecret` | Required. The store's shared secret (SipPulse CRM: `VCON_HMAC_SECRET`); every delivery is signed with it |
-| `AllowedEmailDomains` | Required. Chrome profile domains allowed to capture and receive the email, e.g. `["sippulse.com"]`. There is no built-in domain: capture stays off until this is set |
-| `TranscriptionProvider` | `deepgram` (default; nova-3 multilingual, diarized) or `sippulse_ai` (SipPulse AI streaming gateway, pt-BR) |
-| `TranscriptionUrl` | HTTPS base of the transcription provider: `https://api.deepgram.com`, or `https://api.dev.sippulse.ai` for SipPulse streaming (dev only for now) |
-| `TranscriptionApiKey` | Transcription key (Deepgram: a dedicated `usage:write` key) |
-| `SipPulseAiUrl` | HTTPS base of SipPulse AI for live notes and the report: `https://api.sippulse.ai` |
-| `SipPulseAiApiKey` | Key for the same environment as `SipPulseAiUrl` |
-| `TypeSafeUrl` | HTTPS base of TypeSafe for Jev classification: `https://api.typesafe.ai` |
-| `TypeSafeApiKey` | TypeSafe key |
-| `CaptureEnabled` | Optional; `false` disables capture (policy only) |
+**Required — three values:**
 
-No endpoint is built into the extension (it is open source; each
-organization points it at its own servers). Without the vCon store nothing
-is delivered; without the SipPulse AI URL and key only Google captions are
-captured (no live transcript or notes); without the TypeSafe URL and key
-lines are not tagged and the report has no intents or sentiment.
+| Field | Meaning |
+|---|---|
+| `SipPulseAiApiKey` | SipPulse AI key. Covers live transcription and meeting notes |
+| `EndpointUrl` | HTTPS URL of the vCon store. SipPulse: `https://crm.sippulse.com/api/vcons/ingest` |
+| `HmacSecret` | The vCon store's shared secret (SipPulse CRM: `VCON_HMAC_SECRET`); every delivery is signed with it |
+
+**Optional:**
+
+| Field | Meaning |
+|---|---|
+| `SipPulseAiUrl` | HTTPS base of SipPulse AI. Defaults to `https://api.sippulse.ai` |
+| `AllowedEmailDomains` | Restrict which Chrome profiles may capture, e.g. `["sippulse.com"]`. Unset, any signed-in profile may |
+| `TranscriptionProvider` | `sippulse_ai` (default; pt-BR) or `deepgram` (nova-3, multilingual, diarized) |
+| `TranscriptionUrl` | Only to transcribe somewhere other than SipPulse AI, e.g. `https://api.deepgram.com`. Defaults to the SipPulse AI URL |
+| `TranscriptionApiKey` | Key for `TranscriptionUrl`. Defaults to `SipPulseAiApiKey` |
+| `TypeSafeUrl` + `TypeSafeApiKey` | Inline intent tags with TypeSafe Jev, e.g. `https://api.typesafe.ai`. No default: tags are off unless set |
+| `CaptureEnabled` | `false` disables capture (policy only) |
+
+The only endpoint built into the extension is SipPulse AI's public API, as
+the default for `SipPulseAiUrl`; the vCon store is always the
+organization's own. Without the three required values the extension stays
+off and says which one is missing.
 
 **Host access needs one click per collaborator, even with policy.** The
 manifest only asks for `meet.google.com`; every configured server is an
@@ -62,18 +69,16 @@ or enrolled browsers), for the extension ID it is configured on.
 
 ```json
 {
-  "EndpointUrl": { "Value": "https://crm.sippulse.com/api/vcons/ingest" },
-  "HmacSecret": { "Value": "CRM_VCON_HMAC_SECRET" },
-  "AllowedEmailDomains": { "Value": ["sippulse.com"] },
-  "TranscriptionProvider": { "Value": "deepgram" },
-  "TranscriptionUrl": { "Value": "https://api.deepgram.com" },
-  "TranscriptionApiKey": { "Value": "DEEPGRAM_KEY" },
-  "SipPulseAiUrl": { "Value": "https://api.sippulse.ai" },
   "SipPulseAiApiKey": { "Value": "SIPPULSE_AI_KEY" },
-  "TypeSafeUrl": { "Value": "https://api.typesafe.ai" },
-  "TypeSafeApiKey": { "Value": "TYPESAFE_KEY" }
+  "EndpointUrl": { "Value": "https://crm.sippulse.com/api/vcons/ingest" },
+  "HmacSecret": { "Value": "CRM_VCON_HMAC_SECRET" }
 }
 ```
+
+That is the whole SipPulse configuration. Add optional fields the same way,
+e.g. `"AllowedEmailDomains": { "Value": ["sippulse.com"] }` to restrict
+capture to company accounts, or `TypeSafeUrl`/`TypeSafeApiKey` for inline
+intent tags.
 
 6. On a pilot machine, open `chrome://policy`, choose **Reload policies**, and
    check the extension's entries; then open the extension's options page: the
@@ -107,7 +112,7 @@ no `"Value"` wrapper):
   "3rdparty": {
     "extensions": {
       "EXTENSION_ID": {
-        "SipPulseAiApiKey": "SIPPULSE_AI_DEV_KEY"
+        "SipPulseAiApiKey": "SIPPULSE_AI_KEY"
       }
     }
   }
@@ -119,9 +124,9 @@ no `"Value"` wrapper):
 All credentials are pilot mechanisms and are readable by anyone with access
 to a configured machine, whether they came from policy or local settings:
 
-- Create a dedicated SipPulse AI dev key for Meet Capture with a spending
+- Create a dedicated SipPulse AI key for Meet Capture with a spending
   limit, and rotate it on a schedule.
-- Create a dedicated TypeSafe key for Meet Capture.
+- If you enable inline tags, create a dedicated TypeSafe key.
 - The HMAC secret is shared by every enrolled machine and the CRM; anyone who
   reads it can post vCons to the CRM. Rotate it on the CRM
   (`VCON_HMAC_SECRET`) and in policy together, and replace it with SipPulse
@@ -152,10 +157,11 @@ discard behavior have passed the pilot checklist.
 
 1. Open the options page, check that each field shows where it comes from
    ("set by Google Admin" or "saved on this computer"), and choose **Test
-   connections**; vCon storage,
-   SipPulse AI, and TypeSafe must all report OK.
-2. Confirm capture stays off before consent and for a non-SipPulse Chrome
-   profile. Upgrading from 0.2 must ask for consent again.
+   connections**; the vCon store, transcription, and SipPulse AI must report
+   OK (TypeSafe too, if configured).
+2. Confirm capture stays off before consent, and for a profile outside
+   `AllowedEmailDomains` when that is set. Upgrading from 0.2 must ask for
+   consent again.
 3. Join Meet and verify the visible panel shows Google captions in the
    Transcript tab.
 4. Click the extension and choose **Start live transcription & notes**. On

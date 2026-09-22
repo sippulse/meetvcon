@@ -16,11 +16,23 @@
   let currentMeetingId = null;
 
   async function capturePrerequisite(meetingId) {
-    const state = await chrome.runtime.sendMessage({ type: "get_popup_state" });
-    if (!state?.consented) return { status: "setup_required", state };
+    // A failed lookup is its own state: reporting it as "no consent yet"
+    // sent people to a dialog that had nothing to accept.
+    let state;
+    try {
+      state = await chrome.runtime.sendMessage({ type: "get_popup_state" });
+    } catch (error) {
+      log.error("could not read extension state", error);
+      return { status: "state_unavailable", detail: error.message };
+    }
+    if (!state?.ok) {
+      log.error("extension state unavailable", state?.error);
+      return { status: "state_unavailable", detail: state?.error, state };
+    }
+    if (!state.consented) return { status: "setup_required", state };
     if (!state.collaboratorAuthorized) return { status: "identity_required", state };
     if (!state.config.configured || !state.config.captureEnabled) {
-      return { status: "managed_disabled", state };
+      return { status: "managed_disabled", state, detail: state.config.error };
     }
     if (meetingId && state.discardedMeetingIds?.includes(meetingId)) {
       return { status: "discarded", state };
@@ -30,9 +42,9 @@
 
   async function startCapture() {
     currentMeetingId = transcriptCapture.meetingIdFromUrl();
-    const { status, state } = await capturePrerequisite(currentMeetingId);
+    const { status, state, detail } = await capturePrerequisite(currentMeetingId);
     if (status !== "ready") {
-      inCallPanel.lock(status);
+      inCallPanel.lock(status, detail || "");
       return;
     }
 

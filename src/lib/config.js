@@ -2,19 +2,22 @@
 // admin.google.com, read through chrome.storage.managed) and local settings
 // saved on the options page. Policy always wins and locks the field.
 //
-// No endpoint is built in: this is an open-source extension and each
-// organization points it at its own vCon store and providers.
+// Required: SipPulseAiApiKey, plus the vCon store (EndpointUrl + HmacSecret).
+// Everything else is optional. The only built-in endpoint is SipPulse AI's
+// public API, the default for SipPulseAiUrl; the vCon store is always the
+// organization's own.
 //
 // Fields:
-// - EndpointUrl + HmacSecret: the vCon store that receives the final vCon,
-//   signed with X-MeetVcon-Signature (HMAC-SHA256 of the body).
-// - AllowedEmailDomains: who may capture and receive the email. Required:
-//   there is no built-in domain, so capture stays off until it is set.
-// - TranscriptionProvider ("deepgram" | "sippulse_ai") + TranscriptionUrl +
-//   TranscriptionApiKey: live transcription over the /v1/listen WebSocket.
-// - SipPulseAiUrl + SipPulseAiApiKey: meeting notes (OpenAI-compatible
-//   /v1/openai/chat/completions).
-// - TypeSafeUrl + TypeSafeApiKey: Jev inline classification (/v1/systemone).
+// - EndpointUrl + HmacSecret (required): the vCon store that receives the
+//   final vCon, signed with X-MeetVcon-Signature (HMAC-SHA256 of the body).
+// - SipPulseAiApiKey (required) + SipPulseAiUrl (default DEFAULT_SIPPULSE_AI_URL):
+//   live transcription (/v1/listen WebSocket) and meeting notes
+//   (/v1/openai/chat/completions), one key for both.
+// - AllowedEmailDomains (optional): restricts which Chrome profiles may
+//   capture; unset, any signed-in profile may.
+// - TranscriptionProvider/Url/ApiKey (optional): send transcription somewhere
+//   other than SipPulse AI (e.g. Deepgram); default to the SipPulse AI pair.
+// - TypeSafeUrl + TypeSafeApiKey (optional): Jev inline classification.
 // - CaptureEnabled: policy-only kill switch the collaborator cannot override.
 
 (function (root) {
@@ -34,9 +37,14 @@
     provider: "typesafe",
     model: "jev-latest",
   });
+  const DEFAULT_SIPPULSE_AI_URL = "https://api.sippulse.ai";
   const DEFAULTS = Object.freeze({
-    transcriptionProvider: "deepgram",
+    sippulseAiUrl: DEFAULT_SIPPULSE_AI_URL,
+    // SipPulse AI's streaming model is in production; Deepgram is the
+    // alternative for organizations that want multilingual transcription.
+    transcriptionProvider: "sippulse_ai",
     captureEnabled: true,
+    // Empty = no restriction on which signed-in profile may capture.
     allowedEmailDomains: [],
   });
 
@@ -115,11 +123,14 @@
       .filter(Boolean);
   }
 
-  // No domain configured means nobody is allowed: capture fails closed.
+  // A signed-in profile email is always required (it routes the vCon and the
+  // email). With no domains configured, any such profile may capture; the
+  // vCon store still decides whom it emails.
   function isAllowedEmail(email, config = DEFAULTS) {
     if (typeof email !== "string" || !email.includes("@")) return false;
-    const domain = email.slice(email.lastIndexOf("@") + 1).toLowerCase();
-    return (config.allowedEmailDomains || []).includes(domain);
+    const domains = config.allowedEmailDomains || [];
+    if (domains.length === 0) return true;
+    return domains.includes(email.slice(email.lastIndexOf("@") + 1).toLowerCase());
   }
 
   // Is this pair usable as a delivery target? Narrower than normalize(),
@@ -140,17 +151,26 @@
     if (!TRANSCRIPTION_PROVIDERS.includes(provider)) {
       errors.TranscriptionProvider = `TranscriptionProvider must be one of ${TRANSCRIPTION_PROVIDERS.join(", ")}`;
     }
-    const transcriptionApiKey = text(raw.TranscriptionApiKey);
     const store = withoutTrailingSlash(raw.EndpointUrl);
-    const streamBase = withoutTrailingSlash(raw.TranscriptionUrl);
-    const sippulse = withoutTrailingSlash(raw.SipPulseAiUrl);
+    // An invalid URL is reported, never silently replaced by the default.
+    const sippulse = isSet(raw.SipPulseAiUrl) ? withoutTrailingSlash(raw.SipPulseAiUrl) : DEFAULTS.sippulseAiUrl;
+    // SipPulse AI serves streaming transcription and notes from one API with
+    // one key, so an organization on SipPulse configures only SipPulseAi*.
+    // TranscriptionUrl/ApiKey exist to point transcription somewhere else
+    // (Deepgram, or a self-hosted gateway).
+    const streamBase = withoutTrailingSlash(raw.TranscriptionUrl) || sippulse;
+    const transcriptionApiKey = text(raw.TranscriptionApiKey) || text(raw.SipPulseAiApiKey);
     const typesafe = withoutTrailingSlash(raw.TypeSafeUrl);
     const allowedEmailDomains = normalizeDomains(raw.AllowedEmailDomains);
     const hmacSecret = text(raw.HmacSecret);
     const sippulseAiApiKey = text(raw.SipPulseAiApiKey);
     const typesafeApiKey = text(raw.TypeSafeApiKey);
-    const configured = !!store && !!hmacSecret && allowedEmailDomains.length > 0;
-    const missing = !store || !hmacSecret ? "the vCon store endpoint and HMAC secret" : "the allowed email domains";
+    const missing = [
+      !store && "the vCon store endpoint",
+      !hmacSecret && "the vCon store HMAC secret",
+      !sippulseAiApiKey && "the SipPulse AI key",
+    ].filter(Boolean);
+    const configured = missing.length === 0;
 
     return {
       endpointUrl: store,
@@ -166,7 +186,10 @@
         raw.CaptureEnabled === undefined ? DEFAULTS.captureEnabled : raw.CaptureEnabled === true,
       allowedEmailDomains,
       configured,
-      error: errors.EndpointUrl || (configured ? "" : `Configure ${missing} in Google Admin or in Settings`),
+      error:
+        errors.EndpointUrl ||
+        errors.SipPulseAiUrl ||
+        (configured ? "" : `Configure ${missing.join(", ")} in Google Admin or in Settings`),
       errors,
       liveTranscriptionReady: !!streamBase && !!transcriptionApiKey && !errors.TranscriptionProvider,
       analysisReady: !!sippulse && !!sippulseAiApiKey,
@@ -179,7 +202,13 @@
       },
       analysis: { ...ANALYSIS, apiBase: sippulse ? `${sippulse}/v1` : "" },
       classification: { ...CLASSIFICATION, apiBase: typesafe ? `${typesafe}/v1` : "" },
-      origins: originsFor(raw),
+      // From the resolved URLs, so the default SipPulse AI host is included.
+      origins: originsFor({
+        EndpointUrl: store,
+        TranscriptionUrl: streamBase,
+        SipPulseAiUrl: sippulse,
+        TypeSafeUrl: typesafe,
+      }),
     };
   }
 
@@ -199,6 +228,7 @@
 
   ns.config = {
     DEFAULTS,
+    DEFAULT_SIPPULSE_AI_URL,
     TRANSCRIPTION_PROVIDERS,
     ANALYSIS,
     CLASSIFICATION,

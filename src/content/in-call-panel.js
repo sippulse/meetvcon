@@ -28,6 +28,8 @@
 
   let handlers = {};
   let currentStatus = "idle";
+  // The exact reason behind a blocked status (config error, failed lookup).
+  let statusDetail = "";
   let locked = false;
   let audioActive = false;
   let analysisEnabled = false;
@@ -45,8 +47,9 @@
     enabling: ["meetvcon-dot--amber", "Enabling Google captions…"],
     discarded: ["meetvcon-dot--grey", "Stopped. Nothing from this call will be delivered"],
     setup_required: ["meetvcon-dot--amber", "Consent is required before capture"],
-    identity_required: ["meetvcon-dot--amber", "Sign in to Chrome with your company account"],
-    managed_disabled: ["meetvcon-dot--grey", "Capture is disabled by SipPulse"],
+    identity_required: ["meetvcon-dot--amber", "Sign in to Chrome with an allowed account"],
+    managed_disabled: ["meetvcon-dot--grey", "Capture is not configured yet"],
+    state_unavailable: ["meetvcon-dot--grey", "The extension could not be reached; reload the tab"],
     capture_error: ["meetvcon-dot--grey", "Capture could not start"],
     idle: ["meetvcon-dot--grey", "Waiting for the meeting"],
   };
@@ -75,7 +78,7 @@
 
   function actionFor() {
     if (capturing()) return ["discard", "Stop and discard this call"];
-    if (currentStatus === "setup_required" || currentStatus === "identity_required") {
+    if (["setup_required", "identity_required", "managed_disabled"].includes(currentStatus)) {
       return ["setup", "Review setup"];
     }
     return null;
@@ -300,7 +303,7 @@
     if (!dom || !document.body.contains(dom.panel)) build();
     const [dotClass, statusText] = statusLine();
     dom.dot.className = `meetvcon-dot ${dotClass}`;
-    dom.status.textContent = statusText;
+    dom.status.textContent = statusDetail ? `${statusText} — ${statusDetail}` : statusText;
     dom.panel.classList.toggle("meetvcon-panel--collapsed", collapsed);
     dom.toggle.textContent = collapsed ? "+" : "–";
     dom.toggle.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
@@ -348,15 +351,17 @@
 
   // Terminal states (discarded, prerequisites) must not be overwritten by
   // later captions-watchdog status changes.
-  function lock(status) {
+  function lock(status, detail = "") {
     locked = true;
     currentStatus = status;
+    statusDetail = detail;
     render();
   }
 
   function onWatchdogStatus(status) {
     if (locked) return;
     currentStatus = status;
+    statusDetail = "";
     scheduleRender();
   }
 
@@ -373,6 +378,7 @@
     locked = false;
     audioActive = false;
     currentStatus = "idle";
+    statusDetail = "";
     unsubscribe.forEach((fn) => fn());
     unsubscribe = [
       ns.captionsWatchdog.onStatusChange(onWatchdogStatus),

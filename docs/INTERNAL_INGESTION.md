@@ -13,19 +13,21 @@ never receives audio.
 
 | Step | Where (SipPulse's configuration) | Credential |
 |---|---|---|
-| Live transcription | Offscreen document → `TranscriptionUrl` as `wss://…/v1/listen`, one mono linear16 WebSocket for the microphone and one for the Meet tab. `deepgram` (current): `wss://api.deepgram.com`, nova-3, `language=multi`, 16 kHz, diarized, `mip_opt_out`. `sippulse_ai`: `wss://api.dev.sippulse.ai`, `pulse-stt-streaming-v1`, pt-BR, 8 kHz, `endpointing=700` | `TranscriptionApiKey`, sent as `Sec-WebSocket-Protocol: token, <key>` |
+| Live transcription | Offscreen document → the transcription base as `wss://…/v1/listen`, one mono linear16 WebSocket for the microphone and one for the Meet tab. `sippulse_ai` (current, default): `wss://api.sippulse.ai`, `pulse-stt-streaming-v1`, pt-BR, 8 kHz, `endpointing=700`. `deepgram` (optional): `wss://api.deepgram.com`, nova-3, `language=multi`, 16 kHz, diarized, `mip_opt_out` | the transcription key (defaults to `SipPulseAiApiKey`), sent as `Sec-WebSocket-Protocol: token, <key>` |
 | Inline classification | Offscreen document → TypeSafe `POST https://api.typesafe.ai/v1/systemone` (`jev-latest`) once per final transcript segment: intent (Choice), sentiment (Score 0–4), action item (Noul) | `TypeSafeApiKey` policy, `Authorization: Bearer` |
 | Live notes and final report | Offscreen document → SipPulse AI `POST https://api.sippulse.ai/v1/openai/chat/completions` (`deepseek-v4.1-flash`, JSON schema) | `SipPulseAiApiKey` policy, `api-key` header |
 | vCon store (CRM) | Service worker → `https://crm.sippulse.com/api/vcons/ingest` | `HmacSecret` (the CRM's `VCON_HMAC_SECRET`), `X-MeetVcon-Signature` |
 
-SipPulse currently streams to **Deepgram**: the SipPulse AI streaming model
-is only deployed on the dev environment, which is out until Monday. Switching
-back is configuration only (`TranscriptionProvider=sippulse_ai`,
-`TranscriptionUrl=https://api.dev.sippulse.ai`, a dev key). The SipPulse model
-is multilingual (a nemotron-asr derivative), but the dev gateway validates
+SipPulse streams to its own gateway in production, so **one key
+(`SipPulseAiApiKey`) covers transcription and notes**, and `SipPulseAiUrl`
+defaults to `https://api.sippulse.ai`. `TranscriptionUrl` and
+`TranscriptionApiKey` exist only to send transcription elsewhere (e.g.
+Deepgram) and default to the SipPulse AI pair. The model is multilingual (a
+nemotron-asr derivative), but the gateway still validates
 `language ∈ {pt-BR, pt}` and rejects anything else at the handshake with
-HTTP 400 `UNSUPPORTED_LANGUAGE`; per-provider parameters live in `PROFILES`
-in `src/lib/transcription.js`.
+HTTP 400 `UNSUPPORTED_LANGUAGE` (checked against production on
+2026-09-22), so the extension sends pt-BR only. Per-provider parameters live
+in `PROFILES` in `src/lib/transcription.js`.
 
 The collaborator is always identified by the microphone stream. Deepgram
 diarizes the tab stream and each remote voice is named from the Google Meet

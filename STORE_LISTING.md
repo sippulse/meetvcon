@@ -34,12 +34,10 @@ report to the signed-in SipPulse collaborator.
   nothing is granted until the collaborator allows each host. SipPulse's
   configuration:
 - `https://crm.sippulse.com/*`: deliver the final vCon to the SipPulse CRM vCon store.
-- `https://api.deepgram.com/*`: verify the transcription key; audio streams
-  over Deepgram's WebSocket for live transcription.
-- `https://api.sippulse.ai/*`: send transcript text to SipPulse AI for meeting
-  notes and the report.
-- `https://api.typesafe.ai/*`: classify each transcript line's intent,
-  sentiment, and action items.
+- `https://api.sippulse.ai/*`: stream audio to SipPulse AI for live
+  transcription and send transcript text for meeting notes and the report.
+- `https://api.typesafe.ai/*` (optional): classify each transcript line's
+  intent, sentiment, and action items.
 
 ## Data disclosure
 

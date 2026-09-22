@@ -10,14 +10,14 @@ to the capturing collaborator (`@sippulse.com` by default; the
 
 ## How it works
 
-- **Live transcription (Deepgram or SipPulse AI):** the collaborator clicks
+- **Live transcription (SipPulse AI by default):** the collaborator clicks
   the extension action once during the meeting. The offscreen recorder
   streams the collaborator's microphone and the Meet tab as two mono streams
-  over the `/v1/listen` protocol to the configured provider: Deepgram
-  (nova-3, multilingual PT/ES/EN, diarized) or the SipPulse AI gateway
-  (`pulse-stt-streaming-v1`, pt-BR). Remote voices are named from Google Meet
+  over the `/v1/listen` protocol to the SipPulse AI gateway
+  (`pulse-stt-streaming-v1`, pt-BR), or to Deepgram (nova-3, multilingual,
+  diarized) when configured. Remote voices are named from Google Meet
   caption labels. No audio is stored.
-- **Inline classification (TypeSafe Jev):** each final line is classified in
+- **Inline classification (TypeSafe Jev, optional):** each final line is classified in
   about 300 ms — intent (commitment, decision, question, objection, buying
   signal, problem, scheduling), sentiment, and action item — and tagged in
   the live transcript.
@@ -75,11 +75,12 @@ to publish on a SipPulse-owned page is in [docs/PRIVACY.md](./docs/PRIVACY.md).
 
 ## Security
 
-No server is built in: the extension only talks to the vCon store and
-providers configured by the organization (Google Admin or Settings), and
-Chrome must grant each of those hosts (optional host permissions). SipPulse
-configures its CRM vCon store (HMAC-signed), SipPulse AI (transcription and
-notes), and TypeSafe (classification). Audio is streamed and never stored.
+The minimal configuration is the SipPulse AI key plus the vCon store
+(endpoint and HMAC secret). The only built-in endpoint is SipPulse AI's
+public API (`https://api.sippulse.ai`, overridable); the vCon store and any
+other provider are configured by the organization (Google Admin or
+Settings), and Chrome must grant each host (optional host permissions).
+Audio is streamed and never stored.
 
 Caption records, outbox payloads, and the local "last transcript" copy are
 AES-GCM encrypted before they reach `chrome.storage.local`. Be precise about
