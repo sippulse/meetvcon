@@ -12,14 +12,15 @@
       <p class="intro">
         Live, speaker-labelled Google Meet transcripts with AI notes. The
         final transcript and meeting report are saved to your organization's
-        vCon store and emailed to the capturing collaborator.
+        vCon store and emailed to the capturing collaborator. The live view is
+        Chrome's side panel, opened from the extension button.
       </p>
 
       <section class="card" aria-labelledby="disclosure-title">
         <h2 id="disclosure-title">Before you enable capture</h2>
         <ul>
           <li>Google caption text is captured automatically as a fallback.</li>
-          <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to the transcription provider your organization configured (<strong>Deepgram</strong> or <strong>SipPulse AI</strong>), which returns the transcript; audio is not stored by the extension.</li>
+          <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to <strong>SipPulse AI</strong>, which returns the transcript; audio is not stored by the extension.</li>
           <li>The transcript is sent to <strong>SipPulse AI</strong> during and after the call to produce notes: summary, topics, action items, decisions, and open questions.</li>
           <li>Each transcribed line is sent to <strong>TypeSafe</strong> (Jev model) to classify its intent, sentiment, and whether it is an action item.</li>
           <li>The final vCon, including the meeting report, is stored in your organization's vCon store and emailed to <strong id="email">your company email</strong>.</li>
@@ -87,18 +88,6 @@
                 <option value="final">When the call ends</option>
                 <option value="live">During the call (notes every minute, tags per line)</option>
               </select>
-            </label>
-            <label class="field">
-              <span>Live transcription provider <em data-source="TranscriptionProvider"></em></span>
-              <select name="TranscriptionProvider"></select>
-            </label>
-            <label class="field">
-              <span>Live transcription URL <em data-source="TranscriptionUrl"></em></span>
-              <input name="TranscriptionUrl" type="url" placeholder="defaults to the SipPulse AI URL" />
-            </label>
-            <label class="field">
-              <span>Live transcription API key <em data-source="TranscriptionApiKey"></em></span>
-              <input name="TranscriptionApiKey" type="password" placeholder="defaults to the SipPulse AI key" />
             </label>
             <label class="field">
               <span>TypeSafe URL (inline intent tags) <em data-source="TypeSafeUrl"></em></span>

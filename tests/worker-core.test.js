@@ -33,9 +33,6 @@ async function setup({ fetchResponder, chromeOptions, policy = {} } = {}) {
     EndpointUrl: ENDPOINT,
     HmacSecret: HMAC_SECRET,
     AllowedEmailDomains: ["sippulse.com"],
-    TranscriptionProvider: "deepgram",
-    TranscriptionUrl: "https://api.deepgram.com",
-    TranscriptionApiKey: "dg-key",
     SipPulseAiUrl: "https://api.sippulse.ai",
     SipPulseAiApiKey: "sp-key",
     TypeSafeUrl: "https://api.typesafe.ai",
@@ -194,9 +191,7 @@ test("connection test proves the HMAC secret with a signed non-vCon probe, and c
   const storageCall = fetch.calls.find((call) => call.url === ENDPOINT);
   assert.deepEqual(JSON.parse(storageCall.init.body), { connection_test: true }, "never a real vCon");
   assert.ok(signatureValid(storageCall));
-  const deepgram = fetch.calls.find((call) => call.url.startsWith("https://api.deepgram.com/"));
-  assert.equal(deepgram.init.headers.Authorization, "Token dg-key");
-  assert.equal(result.services.transcription.ok, true);
+  assert.equal(result.services.transcription.ok, true, "transcription and notes share the SipPulse AI key");
   const sippulse = fetch.calls.find((call) => call.url.startsWith("https://api.sippulse.ai/"));
   assert.equal(sippulse.init.headers["api-key"], "sp-key");
   const typesafe = fetch.calls.find((call) => call.url.startsWith("https://api.typesafe.ai/"));
@@ -208,7 +203,7 @@ test("connection test proves the HMAC secret with a signed non-vCon probe, and c
 const LIVE_RESULT = {
   ok: true,
   streamStartedAt: "2026-09-04T12:00:00.500Z",
-  transcription: { provider: "deepgram", model: "nova-3", language: "multi" },
+  transcription: { provider: "sippulse_ai", model: "pulse-stt-streaming-v1", language: "pt-BR" },
   utterances: [
     { segment_id: 1, speaker: "Ana", email: "ana@sippulse.com", text: "Envio a proposta.", start: "2026-09-04T12:00:02.000Z", duration: 2, channel: "microphone" },
     { segment_id: 2, speaker: "Bruno Lima", text: "Combinado.", start: "2026-09-04T12:00:05.000Z", duration: 1, channel: "meeting" },
@@ -252,11 +247,11 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
   assert.equal(start.streamId, "stream-for-tab-42");
   assert.equal(start.target, "offscreen");
-  assert.equal(start.config.transcription.apiKey, "dg-key");
+  assert.equal(start.config.transcription.apiKey, "sp-key");
   assert.equal(start.config.sippulseAiApiKey, "sp-key");
   assert.equal(start.config.typesafeApiKey, "ts-key");
-  assert.equal(start.config.transcription.provider, "deepgram");
-  assert.equal(start.config.transcription.streamBase, "wss://api.deepgram.com");
+  assert.equal(start.config.transcription.streamBase, "wss://api.sippulse.ai");
+  assert.equal(start.config.transcription.apiKey, "sp-key");
   assert.equal(start.config.analysis.apiBase, "https://api.sippulse.ai/v1");
   assert.equal(start.config.analysis.model, "deepseek-v4.1-flash");
   assert.equal(start.config.classification.model, "jev-latest");
@@ -278,20 +273,17 @@ test("live capture obtains the tab stream in the worker, hands the recorder its 
   const popup = await send(core, { type: "get_popup_state" });
   assert.deepEqual(popup.aiMeetingIds, ["abc-defg-hij"]);
   assert.deepEqual(popup.liveSessions, { "abc-defg-hij": { streamStartedAt: "2026-09-04T12:00:00.500Z" } });
-  assert.equal(popup.status.source, "deepgram_live");
+  assert.equal(popup.status.source, "sippulse_ai_live");
 });
 
-test("without its own key, transcription falls back to the SipPulse AI one; with neither, capture is refused", async () => {
-  const inherited = await setup({ policy: { TranscriptionUrl: "", TranscriptionApiKey: "", TranscriptionProvider: "" } });
+test("transcription rides on the SipPulse AI pair; without it, capture is refused", async () => {
+  const inherited = await setup({ policy: { SipPulseAiUrl: "" } });
   assert.equal((await startLive(inherited.core)).ok, true);
   const start = inherited.chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
-  assert.equal(start.config.transcription.streamBase, "wss://api.sippulse.ai");
+  assert.equal(start.config.transcription.streamBase, "wss://api.sippulse.ai", "the built-in default");
   assert.equal(start.config.transcription.apiKey, "sp-key");
-  assert.equal(start.config.transcription.provider, "sippulse_ai");
 
-  const { core, chrome } = await setup({
-    policy: { TranscriptionUrl: "", TranscriptionApiKey: "", SipPulseAiUrl: "", SipPulseAiApiKey: "" },
-  });
+  const { core, chrome } = await setup({ policy: { SipPulseAiUrl: "", SipPulseAiApiKey: "" } });
   const result = await startLive(core);
   assert.equal(result.ok, false);
   assert.match(result.error, /SipPulse AI key/, "the error names what is missing");
@@ -341,7 +333,7 @@ test("call end hands off to the recorder, then its result delivers one live vCon
   const ended = await send(core, { type: "call_ended", meetingId: "abc-defg-hij" });
   assert.equal(ended.ok, true);
   assert.equal(ended.pending, true);
-  assert.equal(ended.source, "deepgram_live");
+  assert.equal(ended.source, "sippulse_ai_live");
   const stop = chrome.runtime._messages.find((m) => m.type === "ai_capture_stop");
   assert.equal(stop.captions[0].speaker, "Ana");
   assert.equal(stop.collaborator.email, "ana@sippulse.com");
@@ -353,7 +345,7 @@ test("call end hands off to the recorder, then its result delivers one live vCon
   await send(core, { type: "ai_session_result", meetingId: "abc-defg-hij", result: LIVE_RESULT });
 
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "deepgram_live");
+  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "sippulse_ai_live");
   const document = JSON.parse(fetch.calls[0].init.body);
   assert.equal(document.uuid, "uuid-abc-defg-hij");
   assert.deepEqual(document.parties, [{ name: "Ana", mailto: "ana@sippulse.com" }, { name: "Bruno Lima" }]);
@@ -369,7 +361,7 @@ test("call end hands off to the recorder, then its result delivers one live vCon
     { dialog: 0, intent: "commitment", intent_confidence: 0.99, sentiment: 0.5, action_item: 0.98 },
   ]);
   assert.equal(document.analysis[3].product, "jev-1.13.0");
-  assert.equal(document.attachments[0].body.transcription.model, "nova-3");
+  assert.equal(document.attachments[0].body.transcription.model, "pulse-stt-streaming-v1");
   assert.equal((await status(chrome)).state, "delivered");
   assert.deepEqual((await send(core, { type: "get_popup_state" })).activeMeetingIds, []);
   assert.equal((await send(core, { type: "get_popup_state" })).lastTranscript.hasReport, true);
@@ -394,7 +386,7 @@ test("a failed recorder result falls back to the live segments and classificatio
   await send(core, { type: "ai_session_result", meetingId: "abc-defg-hij", result: { ok: false, error: "socket lost" } });
 
   assert.equal(fetch.calls.length, 1);
-  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "deepgram_live_recovered");
+  assert.equal(fetch.calls[0].init.headers["X-SipPulse-Transcription-Source"], "sippulse_ai_live_recovered");
   const document = JSON.parse(fetch.calls[0].init.body);
   assert.equal(document.dialog[0].body, "Proposta até sexta.");
   assert.equal(document.analysis[0].body, "Notas ao vivo.");
@@ -471,8 +463,6 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
       settings: {
         EndpointUrl: ENDPOINT,
         HmacSecret: "local-secret",
-        TranscriptionUrl: "https://api.deepgram.com/",
-        TranscriptionApiKey: "local-dg-key-5678",
         SipPulseAiUrl: "https://api.sippulse.ai/",
         SipPulseAiApiKey: "local-sp-key-1234",
         AllowedEmailDomains: "sippulse.com, example.com",
@@ -491,7 +481,7 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
   assert.deepEqual(saved.fields.AllowedEmailDomains.value, ["sippulse.com", "example.com"]);
   assert.equal(saved.fields.TypeSafeApiKey.source, "default");
   const stored = JSON.stringify(await chrome.storage.local.get(null));
-  assert.equal(stored.includes("local-sp-key") || stored.includes("local-dg-key"), false, "keys are only in the encrypted store");
+  assert.equal(stored.includes("local-sp-key"), false, "keys are only in the encrypted store");
 
   const popup = await send(core, { type: "get_popup_state" });
   assert.equal(popup.config.configured, true);
@@ -501,7 +491,7 @@ test("local settings fill what Google Admin policy leaves unset, and policy fiel
   assert.equal(started.ok, true);
   const start = chrome.runtime._messages.find((m) => m.type === "ai_capture_start");
   assert.equal(start.config.sippulseAiApiKey, "local-sp-key-1234");
-  assert.equal(start.config.transcription.apiKey, "local-dg-key-5678");
+  assert.equal(start.config.transcription.apiKey, "local-sp-key-1234", "one key for both");
 });
 
 test("policy wins over local settings, and saving never overrides a policy field", async () => {
@@ -594,7 +584,6 @@ test("hosts the user has not allowed yet are reported, and the connection test s
   const settings = await core.handleMessage({ type: "get_settings" }, OPTIONS);
   assert.deepEqual(JSON.parse(JSON.stringify(settings.origins)), [
     "https://crm.sippulse.com/*",
-    "https://api.deepgram.com/*",
     "https://api.sippulse.ai/*",
     "https://api.typesafe.ai/*",
   ]);
@@ -639,10 +628,10 @@ test("the recovered vCon keeps the provider's model and language", async () => {
   await send(core, { type: "ai_session_result", meetingId: "abc-defg-hij", result: { ok: false, error: "socket lost" } });
 
   const metadata = JSON.parse(fetch.calls[0].init.body).attachments[0].body;
-  assert.equal(metadata.transcription_source, "deepgram_live_recovered");
+  assert.equal(metadata.transcription_source, "sippulse_ai_live_recovered");
   assert.deepEqual(
     { provider: metadata.transcription.provider, model: metadata.transcription.model, language: metadata.transcription.language },
-    { provider: "deepgram", model: "nova-3", language: "multi" }
+    { provider: "sippulse_ai", model: "pulse-stt-streaming-v1", language: "pt-BR" }
   );
 });
 

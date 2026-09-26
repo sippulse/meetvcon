@@ -24,19 +24,6 @@ let missingOrigins = [];
 const { config: configLib, transcription } = self.MeetVcon;
 const SECRET_FIELDS = new Set(configLib.SECRET_FIELDS);
 
-// One option per provider the extension knows how to speak to.
-function renderProviders() {
-  const select = elements.settingsForm.elements.TranscriptionProvider;
-  select.replaceChildren();
-  for (const provider of ["", ...configLib.TRANSCRIPTION_PROVIDERS]) {
-    const option = document.createElement("option");
-    option.value = provider;
-    option.textContent = provider
-      ? transcription.profile(provider).label
-      : `${transcription.profile(configLib.DEFAULTS.transcriptionProvider).label} (default)`;
-    select.append(option);
-  }
-}
 const SOURCE_LABELS = {
   policy: "set by Google Admin",
   local: "saved on this computer",
@@ -54,11 +41,7 @@ function renderSettings(fields) {
     const shown = Array.isArray(field.value) ? field.value.join(", ") : field.value || "";
     if (SECRET_FIELDS.has(name)) {
       input.value = "";
-      input.placeholder = shown
-        ? `Stored ${shown}`
-        : name === "TranscriptionApiKey"
-        ? "defaults to the SipPulse AI key"
-        : "Not set";
+      input.placeholder = shown ? `Stored ${shown}` : "Not set";
     } else {
       input.value = shown;
     }
@@ -95,7 +78,6 @@ async function requestAccess(origins) {
 }
 
 async function loadSettings() {
-  renderProviders();
   const result = await chrome.runtime.sendMessage({ type: "get_settings" });
   if (!result?.ok) throw new Error(result?.error || "Could not load settings");
   renderSettings(result.fields);
@@ -130,10 +112,9 @@ async function refresh() {
       ? "Enabled"
       : "Disabled by administrator"
     : "Waiting for your consent";
-  const provider = transcription.profile(state.config.transcriptionProvider);
   elements.provider.textContent = state.config.liveTranscriptionReady
-    ? `${provider ? provider.label : state.config.transcriptionProvider} (Google captions fallback)`
-    : "Google captions only (transcription URL and key not configured)";
+    ? `${transcription.PROFILE.label} (Google captions fallback)`
+    : "Google captions only (SipPulse AI URL and key not configured)";
   const when = state.config.analysisMode === "live" ? "during the call" : "when the call ends";
   elements.notes.textContent = state.config.analysisReady
     ? `SipPulse AI, ${when}`

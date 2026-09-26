@@ -35,23 +35,19 @@ test("endpoints come from configuration, must be https, and derive the provider 
     EndpointUrl: "https://crm.example.com/api/vcons/ingest",
     HmacSecret: "secret",
     AllowedEmailDomains: ["example.com"],
-    TranscriptionUrl: "https://stt.example.com/",
-    TranscriptionApiKey: "d",
     SipPulseAiUrl: "https://llm.example.com",
     SipPulseAiApiKey: "k",
     TypeSafeUrl: "https://ts.example.com",
     TypeSafeApiKey: "t",
   });
   assert.equal(result.configured, true);
-  assert.equal(result.transcription.provider, "sippulse_ai", "provider type defaults to SipPulse streaming");
-  assert.equal(result.transcription.streamBase, "wss://stt.example.com");
-  assert.equal(result.transcription.apiBase, "https://stt.example.com");
-  assert.equal(result.transcription.apiKey, "d", "the key travels with the transcription settings");
+  assert.equal(result.transcription.streamBase, "wss://llm.example.com");
+  assert.equal(result.transcription.apiBase, "https://llm.example.com");
+  assert.equal(result.transcription.apiKey, "k", "one SipPulse AI key, one host");
   assert.equal(result.analysis.apiBase, "https://llm.example.com/v1");
   assert.equal(result.classification.apiBase, "https://ts.example.com/v1");
   assert.deepEqual([...result.origins], [
     "https://crm.example.com/*",
-    "https://stt.example.com/*",
     "https://llm.example.com/*",
     "https://ts.example.com/*",
   ]);
@@ -63,46 +59,36 @@ test("endpoints come from configuration, must be https, and derive the provider 
   assert.equal(config.normalize({ EndpointUrl: "https://user:pw@crm.example.com/x", HmacSecret: "s" }).configured, false);
 });
 
-test("one SipPulse AI key covers transcription and notes; other providers override it", () => {
+test("one SipPulse AI pair serves transcription and notes; there is no second provider to configure", () => {
   const { config } = loadLibrary("src/lib/config.js");
   const onlySipPulse = config.normalize({ SipPulseAiUrl: "https://api.sippulse.ai", SipPulseAiApiKey: "sp" });
-  assert.equal(onlySipPulse.liveTranscriptionReady, true, "transcription inherits the SipPulse AI URL and key");
+  assert.equal(onlySipPulse.liveTranscriptionReady, true);
   assert.equal(onlySipPulse.analysisReady, true);
-  assert.equal(onlySipPulse.transcription.provider, "sippulse_ai");
   assert.equal(onlySipPulse.transcription.streamBase, "wss://api.sippulse.ai");
   assert.equal(onlySipPulse.transcription.apiKey, "sp");
   assert.deepEqual([...onlySipPulse.origins], ["https://api.sippulse.ai/*"], "one host, not two");
 
-  const override = config.normalize({
+  // Transcription overrides were removed with Deepgram: unknown fields are ignored.
+  const legacy = config.normalize({
     SipPulseAiUrl: "https://api.sippulse.ai",
     SipPulseAiApiKey: "sp",
     TranscriptionProvider: "deepgram",
     TranscriptionUrl: "https://api.deepgram.com",
     TranscriptionApiKey: "dg",
   });
-  assert.equal(override.transcription.streamBase, "wss://api.deepgram.com");
-  assert.equal(override.transcription.apiKey, "dg");
-  assert.equal(override.analysis.apiBase, "https://api.sippulse.ai/v1", "notes stay on SipPulse AI");
+  assert.equal(legacy.transcription.streamBase, "wss://api.sippulse.ai");
+  assert.equal(legacy.transcription.apiKey, "sp");
+  assert.deepEqual([...legacy.origins], ["https://api.sippulse.ai/*"], "no host is asked for Deepgram");
+  assert.deepEqual([...config.LOCAL_FIELDS].filter((field) => field.startsWith("Transcription")), []);
 });
 
-test("transcription and notes are configured independently; the provider type must be known", () => {
+test("the models are fixed, and nothing is ready without a key", () => {
   const { config } = loadLibrary("src/lib/config.js");
   const nothing = config.normalize({});
   assert.equal(nothing.analysisReady, false);
-  assert.equal(nothing.liveTranscriptionReady, false);
-
-  const sippulseStream = config.normalize({
-    TranscriptionUrl: "https://api.sippulse.ai",
-    TranscriptionApiKey: "k",
-  });
-  assert.equal(sippulseStream.liveTranscriptionReady, true);
-  assert.equal(sippulseStream.transcription.provider, "sippulse_ai", "the default provider is SipPulse streaming");
-
-  const unknown = config.normalize({ TranscriptionProvider: "whisper", TranscriptionUrl: "https://x.example.com", TranscriptionApiKey: "k" });
-  assert.equal(unknown.liveTranscriptionReady, false);
-  assert.match(unknown.errors.TranscriptionProvider, /deepgram, sippulse_ai/);
-  assert.equal(config.normalize({}).analysis.model, "deepseek-v4.1-flash");
-  assert.equal(config.normalize({}).classification.model, "jev-latest");
+  assert.equal(nothing.liveTranscriptionReady, false, "the default URL alone is not enough");
+  assert.equal(nothing.analysis.model, "deepseek-v4.1-flash");
+  assert.equal(nothing.classification.model, "jev-latest");
 });
 
 test("policy and local settings merge per field, policy first", () => {

@@ -2,13 +2,11 @@
 // worker, the Meet content script, and unit tests. Pure functions only: the
 // WebSockets live in src/offscreen/offscreen.js.
 //
-// Two providers speak the same /v1/listen WebSocket protocol: Deepgram and
-// the SipPulse AI streaming gateway (Deepgram-compatible, mono only). The
-// recorder opens one mono stream per source either way: channel 0 is the
-// collaborator's microphone, channel 1 is the Meet tab (every remote
-// participant). Deepgram diarizes the tab stream; the SipPulse gateway does
-// not, so its remote segments are named one by one from Google Meet
-// captions.
+// Transcription is the SipPulse AI streaming gateway, over a /v1/listen
+// WebSocket (mono only). The recorder opens one stream per source: channel 0
+// is the collaborator's microphone, channel 1 is the Meet tab (every remote
+// participant). The gateway does not diarize, so remote segments are named
+// one by one from Google Meet captions.
 
 (function (root) {
   const ns = (root.MeetVcon = root.MeetVcon || {});
@@ -28,78 +26,39 @@
   // Meet's own caption label for the local participant, by UI language.
   const SELF_CAPTION_LABELS = new Set(["you", "você", "voce", "tú", "tu", "usted", "vous", "du", "sie"]);
 
-  // Everything provider-specific except the endpoint, which is configured:
-  // label for the options page, model choices, and how to check the key.
-  const PROFILES = Object.freeze({
-    deepgram: Object.freeze({
-      label: "Deepgram nova-3, multilingual",
-      model: "nova-3",
-      // Code-switching PT/ES/EN (nova-3 multilingual).
-      language: "multi",
-      sampleRate: 16_000,
-      params: Object.freeze({
-        diarize: "true",
-        punctuate: "true",
-        smart_format: "true",
-        utterance_end_ms: "1000",
-        // Deepgram recommends 100 ms endpointing for code-switching.
-        endpointing: "100",
-        // Keep meeting audio out of Deepgram's model-improvement program.
-        mip_opt_out: "true",
-      }),
-      keyCheck: Object.freeze({
-        path: "/v1/projects",
-        header: (apiKey) => ({ Authorization: `Token ${apiKey}` }),
-        // A listen-only key is refused project listing but is still valid.
-        alsoOk: Object.freeze([403]),
-      }),
-    }),
-    sippulse_ai: Object.freeze({
-      label: "SipPulse AI streaming, Portuguese",
-      model: "pulse-stt-streaming-v1",
-      // The model is multilingual, but the gateway accepts only pt-BR|pt.
-      language: "pt-BR",
-      sampleRate: 8_000,
-      // Only parameters the gateway documents; it clamps endpointing to
-      // [560, 1500] ms and rejects unknown languages.
-      params: Object.freeze({ endpointing: "700" }),
-      keyCheck: Object.freeze({
-        path: "/v1/openai/models",
-        header: (apiKey) => ({ "api-key": apiKey }),
-        alsoOk: Object.freeze([]),
-      }),
-    }),
+  // Everything about the gateway except its URL, which is configured.
+  const PROFILE = Object.freeze({
+    provider: "sippulse_ai",
+    label: "SipPulse AI streaming, Portuguese",
+    model: "pulse-stt-streaming-v1",
+    // The model is multilingual, but the gateway accepts only pt-BR|pt.
+    language: "pt-BR",
+    sampleRate: 8_000,
+    // Only parameters the gateway documents; it clamps endpointing to
+    // [560, 1500] ms and rejects unknown languages.
+    params: Object.freeze({ endpointing: "700" }),
   });
 
-  function profile(provider) {
-    return PROFILES[provider] || null;
-  }
-
-  function listenUrl({ streamBase, provider }) {
-    const chosen = profile(provider);
-    if (!chosen) throw new Error(`Unknown transcription provider ${provider}`);
+  function listenUrl(streamBase) {
     const params = new URLSearchParams({
-      model: chosen.model,
-      language: chosen.language,
+      model: PROFILE.model,
+      language: PROFILE.language,
       encoding: "linear16",
-      sample_rate: String(chosen.sampleRate),
+      sample_rate: String(PROFILE.sampleRate),
       channels: "1",
       interim_results: "true",
-      ...chosen.params,
+      ...PROFILE.params,
     });
     return `${streamBase}/v1/listen?${params}`;
   }
 
-  // Key check for the options page, driven by the provider's profile.
-  // Only 401 means the key itself is wrong.
-  async function checkKey(fetchImpl, { provider, apiBase, apiKey }) {
-    const chosen = profile(provider);
-    if (!apiKey || !apiBase || !chosen) return { ok: false, error: "Not configured" };
-    const { path, header, alsoOk } = chosen.keyCheck;
+  // Key check for the options page. Only 401 means the key itself is wrong.
+  async function checkKey(fetchImpl, { apiBase, apiKey }) {
+    if (!apiKey || !apiBase) return { ok: false, error: "Not configured" };
     try {
-      const response = await fetchImpl(`${apiBase}${path}`, { headers: header(apiKey) });
+      const response = await fetchImpl(`${apiBase}/v1/openai/models`, { headers: { "api-key": apiKey } });
       if (response.status === 401) return { ok: false, status: 401, error: "Key rejected" };
-      return response.ok || alsoOk.includes(response.status)
+      return response.ok
         ? { ok: true, status: response.status }
         : { ok: false, status: response.status, error: `HTTP ${response.status}` };
     } catch (error) {
@@ -107,13 +66,9 @@
     }
   }
 
-  // The X-SipPulse-Transcription-Source value (and delivery status) for a
-  // transcript from this provider, so a Deepgram transcript is never
-  // labelled as another provider's.
-  function sourceLabel(provider, { recovered = false } = {}) {
-    const known = profile(provider) ? provider : "unknown";
-    return recovered ? `${known}_live_recovered` : `${known}_live`;
-  }
+  // The X-SipPulse-Transcription-Source value, and the delivery status.
+  const sourceLabel = ({ recovered = false } = {}) =>
+    recovered ? `${PROFILE.provider}_live_recovered` : `${PROFILE.provider}_live`;
 
   function mostCommon(values) {
     const counts = new Map();
@@ -431,8 +386,7 @@
     MIC_CHANNEL,
     TAB_CHANNEL,
     UNKNOWN_REMOTE,
-    PROFILES,
-    profile,
+    PROFILE,
     listenUrl,
     checkKey,
     sourceLabel,

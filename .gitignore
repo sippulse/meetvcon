@@ -35,5 +35,8 @@ chrome-profile/
 # Playwright profile created by tools/screenshot.js
 .playwright-profile/
 
+# Local Claude Code settings (permission allowlist, per developer)
+.claude/
+
 # Raw screenshot intermediates (only the composited 1280x800 PNGs are committed)
 screenshots/_raw/

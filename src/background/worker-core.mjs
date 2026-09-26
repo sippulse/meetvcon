@@ -94,7 +94,7 @@ export function createWorkerCore({
     const session = await getAiSession(record.meetingId);
     await storage.setDeliveryStatus({
       state: "capturing",
-      source: session ? transcription.sourceLabel(config.transcription.provider) : "google_captions",
+      source: session ? transcription.sourceLabel() : "google_captions",
       error: "",
     });
     // Caption speaker names let the recorder label remote voices in its
@@ -281,7 +281,7 @@ export function createWorkerCore({
     await chrome.alarms.clear(OFFSCREEN_CLEANUP_ALARM);
     await storage.setDeliveryStatus({
       state: "capturing",
-      source: transcription.sourceLabel(config.transcription.provider),
+      source: transcription.sourceLabel(),
       error: "",
     });
     await notifyTab(tabId, meetingId, true, {
@@ -352,7 +352,7 @@ export function createWorkerCore({
           captions: record.utterances || [],
         });
         if (response?.ok) {
-          const source = transcription.sourceLabel(config.transcription.provider);
+          const source = transcription.sourceLabel();
           await setAiSession(meetingId, {
             ...session,
             state: "finalizing",
@@ -443,8 +443,9 @@ export function createWorkerCore({
           utterances,
           streamStartedAt,
           transcription: {
-            provider: config.transcription.provider,
-            ...(transcription.profile(config.transcription.provider) || {}),
+            provider: transcription.PROFILE.provider,
+            model: transcription.PROFILE.model,
+            language: transcription.PROFILE.language,
           },
           analysis: analysis.withClassification(record.liveAnalysis || null, summary),
           analysisModel: config.analysis.liveModel,
@@ -452,7 +453,7 @@ export function createWorkerCore({
           classificationModel: config.classification.model,
           analysisError: record.liveAnalysis ? "Final report unavailable; live notes attached" : "",
         },
-        transcription.sourceLabel(config.transcription.provider, { recovered: true })
+        transcription.sourceLabel({ recovered: true })
       );
     }
     const fallback = assembleVcon(record, deliveryKind, "google_captions_fallback", profile);
@@ -503,7 +504,7 @@ export function createWorkerCore({
         deliveryKind,
         profile,
         result,
-        transcription.sourceLabel(result.transcription?.provider)
+        transcription.sourceLabel()
       );
     }
     log.warn("live transcript unavailable; falling back", result?.error);

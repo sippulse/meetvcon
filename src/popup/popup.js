@@ -2,9 +2,9 @@ const elements = {
   dot: document.getElementById("dot"),
   status: document.getElementById("status"),
   detail: document.getElementById("detail"),
-  startAi: document.getElementById("startAi"),
+  openPanel: document.getElementById("openPanel"),
+  panelHint: document.getElementById("panelHint"),
   setup: document.getElementById("setup"),
-  aiHint: document.getElementById("aiHint"),
   message: document.getElementById("message"),
   email: document.getElementById("email"),
   outbox: document.getElementById("outbox"),
@@ -16,19 +16,9 @@ const elements = {
   settings: document.getElementById("settings"),
 };
 
-const MICROPHONE_PAGE = "src/permissions/microphone.html";
 let state = null;
 let activeTab = null;
 
-function meetingIdFromUrl(url) {
-  try {
-    return new URL(url).pathname.match(/^\/([a-z]{3,4}-[a-z]{4}-[a-z]{3,4})/i)?.[1] || null;
-  } catch {
-    return null;
-  }
-}
-
-// Any live provider's transcript, e.g. deepgram_live or sippulse_ai_live.
 const isLive = (source) => typeof source === "string" && source.endsWith("_live");
 
 function statusCopy(status) {
@@ -37,8 +27,8 @@ function statusCopy(status) {
     capturing: [
       isLive(status.source) ? "Live transcription on" : "Google captions active",
       isLive(status.source)
-        ? "Transcript and AI notes update live in the Meet panel."
-        : "Start live transcription for accuracy, speaker names, and AI notes.",
+        ? "Transcript and AI notes update live in the side panel."
+        : "Open the panel to start live transcription.",
     ],
     finalizing: ["Preparing the meeting report", "Keep Chrome open for a minute while the report is written."],
     delivered: [
@@ -128,78 +118,15 @@ async function refresh() {
   elements.dot.className = `dot dot--${state.status.state || "idle"}`;
 
   const inMeet = activeTab?.url?.startsWith("https://meet.google.com/");
-  const activeMeetingId = meetingIdFromUrl(activeTab?.url);
-  const meetingId = state.activeMeetingIds.includes(activeMeetingId) ? activeMeetingId : null;
-  const aiActive = meetingId && state.aiMeetingIds.includes(meetingId);
   const validEmail = !!state.collaboratorAuthorized;
-  const canStartAi =
-    state.consented &&
-    validEmail &&
-    state.config.configured &&
-    state.config.captureEnabled &&
-    state.config.liveTranscriptionReady &&
-    inMeet &&
-    meetingId &&
-    !aiActive;
 
   const needsAccess = (state.missingOrigins || []).length > 0;
   elements.setup.textContent = needsAccess ? "Allow access to configured servers" : "Review and enable capture";
   elements.setup.classList.toggle("hidden", state.consented && validEmail && !needsAccess);
-  elements.startAi.classList.toggle("hidden", !canStartAi);
-  elements.aiHint.classList.toggle("hidden", !canStartAi);
+  elements.openPanel.classList.toggle("hidden", !inMeet);
+  elements.panelHint.classList.toggle("hidden", !inMeet);
   renderQueue(state.queue);
   renderLastTranscript(state.lastTranscript);
-}
-
-async function microphonePermission() {
-  try {
-    const status = await navigator.permissions.query({ name: "microphone" });
-    return status.state;
-  } catch {
-    return "prompt";
-  }
-}
-
-async function openMicrophonePage() {
-  await chrome.tabs.create({ url: chrome.runtime.getURL(MICROPHONE_PAGE) });
-}
-
-async function startAiCapture() {
-  const candidate = meetingIdFromUrl(activeTab?.url);
-  const meetingId = state?.activeMeetingIds?.includes(candidate) ? candidate : null;
-  if (!meetingId || !activeTab?.id) return;
-  elements.startAi.disabled = true;
-
-  try {
-    if ((await microphonePermission()) !== "granted") {
-      elements.message.textContent =
-        "Allow microphone access in the new tab, then return to Meet and start again.";
-      await openMicrophonePage();
-      return;
-    }
-    elements.message.textContent = "Requesting audio access…";
-    // The worker obtains the tab stream ID itself: IDs issued to the popup
-    // cannot be redeemed by the offscreen recorder.
-    const result = await chrome.runtime.sendMessage({
-      type: "start_ai_capture",
-      meetingId,
-      tabId: activeTab.id,
-    });
-    if (!result?.ok) {
-      if (result?.code === "microphone_permission") {
-        elements.message.textContent = "Microphone access is required. Allow it in the new tab.";
-        await openMicrophonePage();
-        return;
-      }
-      throw new Error(result?.error || "Audio capture failed");
-    }
-    elements.message.textContent = "Live transcription started. Follow it in the Meet panel.";
-    await refresh();
-  } catch (error) {
-    elements.message.textContent = error.message || String(error);
-  } finally {
-    elements.startAi.disabled = false;
-  }
 }
 
 async function queueAction(type, id) {
@@ -218,7 +145,15 @@ async function downloadLast(format) {
   downloadDocument(result.document, format);
 }
 
-elements.startAi.addEventListener("click", startAiCapture);
+elements.openPanel.addEventListener("click", () => {
+  // chrome.sidePanel.open() needs the click itself: nothing may await before it.
+  chrome.sidePanel.open({ tabId: activeTab.id }).then(
+    () => window.close(),
+    (error) => {
+      elements.message.textContent = `${error.message} — open it from Chrome's side panel menu.`;
+    }
+  );
+});
 elements.setup.addEventListener("click", () => chrome.runtime.openOptionsPage());
 elements.settings.addEventListener("click", () => chrome.runtime.openOptionsPage());
 elements.downloadMd.addEventListener("click", () => downloadLast("md"));

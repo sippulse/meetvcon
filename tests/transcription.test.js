@@ -27,7 +27,7 @@ function results(words, { isFinal = true, start = 0, duration = 5 } = {}) {
 const word = (text, start, end, extra = {}) => ({ word: text, start, end, confidence: 0.9, ...extra });
 
 test("the SipPulse gateway gets only the parameters it documents", () => {
-  const url = new URL(transcription.listenUrl({ streamBase: "wss://api.dev.sippulse.ai", provider: "sippulse_ai" }));
+  const url = new URL(transcription.listenUrl("wss://api.dev.sippulse.ai"));
   assert.equal(url.origin + url.pathname, "wss://api.dev.sippulse.ai/v1/listen");
   assert.deepEqual(Object.fromEntries(url.searchParams), {
     model: "pulse-stt-streaming-v1",
@@ -40,26 +40,20 @@ test("the SipPulse gateway gets only the parameters it documents", () => {
   });
 });
 
-test("Deepgram gets nova-3 multilingual at 16 kHz with diarization and the model-improvement opt-out", () => {
-  const url = new URL(transcription.listenUrl({ streamBase: "wss://api.deepgram.com", provider: "deepgram" }));
-  assert.equal(url.origin + url.pathname, "wss://api.deepgram.com/v1/listen");
-  const params = Object.fromEntries(url.searchParams);
-  assert.deepEqual(
-    [params.model, params.language, params.sample_rate, params.channels, params.diarize, params.endpointing, params.mip_opt_out],
-    ["nova-3", "multi", "16000", "1", "true", "100", "true"]
-  );
-  assert.throws(() => transcription.listenUrl({ streamBase: "wss://x", provider: "whisper" }), /Unknown transcription provider/);
-});
-
-test("key checks use each provider's own auth", async () => {
+test("the key check accepts anything but a 401, and names the source of a transcript", async () => {
   const { createFakeFetch } = require("./fake-chrome");
-  const fetch = createFakeFetch((url) => (url.includes("deepgram") ? { status: 403 } : { status: 401 }));
-  const deepgram = await transcription.checkKey(fetch, { provider: "deepgram", apiBase: "https://api.deepgram.com", apiKey: "d" });
-  assert.equal(deepgram.ok, true, "a listen-only Deepgram key may be refused project listing");
-  assert.equal(fetch.calls[0].init.headers.Authorization, "Token d");
-  const sippulse = await transcription.checkKey(fetch, { provider: "sippulse_ai", apiBase: "https://api.dev.sippulse.ai", apiKey: "s" });
-  assert.deepEqual([sippulse.ok, sippulse.error], [false, "Key rejected"]);
-  assert.equal(fetch.calls[1].url, "https://api.dev.sippulse.ai/v1/openai/models");
+  const fetch = createFakeFetch(() => ({ status: 401 }));
+  const rejected = await transcription.checkKey(fetch, { apiBase: "https://api.dev.sippulse.ai", apiKey: "s" });
+  assert.deepEqual([rejected.ok, rejected.error], [false, "Key rejected"]);
+  assert.equal(fetch.calls[0].url, "https://api.dev.sippulse.ai/v1/openai/models");
+  assert.equal(fetch.calls[0].init.headers["api-key"], "s");
+  assert.deepEqual(plain(await transcription.checkKey(fetch, { apiBase: "", apiKey: "" })), {
+    ok: false,
+    error: "Not configured",
+  });
+
+  assert.equal(transcription.sourceLabel(), "sippulse_ai_live");
+  assert.equal(transcription.sourceLabel({ recovered: true }), "sippulse_ai_live_recovered");
 });
 
 test("a final from the gateway becomes one undiarized segment on the stream's channel, shifted by the connection offset", () => {

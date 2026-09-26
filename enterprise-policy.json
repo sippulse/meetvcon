@@ -3,7 +3,7 @@
   "properties": {
     "SipPulseAiApiKey": {
       "title": "SipPulse AI API key (notes)",
-      "description": "Required. SipPulse AI key; covers live transcription and meeting notes. Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "description": "Required. SipPulse AI key; covers live transcription (pulse-stt-streaming-v1, pt-BR) and meeting notes. Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
       "type": "string"
     },
     "EndpointUrl": {
@@ -37,25 +37,6 @@
         "final",
         "live"
       ]
-    },
-    "TranscriptionProvider": {
-      "title": "Live transcription provider",
-      "description": "Optional. sippulse_ai (default; pt-BR) or deepgram (nova-3, multilingual, diarized).",
-      "type": "string",
-      "enum": [
-        "deepgram",
-        "sippulse_ai"
-      ]
-    },
-    "TranscriptionUrl": {
-      "title": "Live transcription base URL",
-      "description": "Optional. Only to transcribe somewhere other than SipPulse AI, e.g. https://api.deepgram.com. Defaults to the SipPulse AI URL.",
-      "type": "string"
-    },
-    "TranscriptionApiKey": {
-      "title": "Live transcription API key",
-      "description": "Optional. Key for TranscriptionUrl. Defaults to SipPulseAiApiKey.",
-      "type": "string"
     },
     "TypeSafeUrl": {
       "title": "TypeSafe base URL",

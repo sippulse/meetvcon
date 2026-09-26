@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SipPulse Meet Capture</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="head">
+      <span id="dot" class="dot dot--grey"></span>
+      <div class="titles">
+        <span class="title">SipPulse Meet Capture</span>
+        <span id="status" class="status" aria-live="polite">Connecting…</span>
+      </div>
+      <button id="settings" type="button" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+    </header>
+
+    <div id="primary" class="primary"></div>
+    <p id="message" class="message" aria-live="polite"></p>
+
+    <div id="tabs" class="tabs" role="tablist"></div>
+    <div id="body" class="body"></div>
+
+    <footer class="foot">
+      <p id="consent" class="consent"></p>
+    </footer>
+
+    <script src="../lib/logger.js"></script>
+    <script src="../lib/transcription.js"></script>
+    <script src="../lib/classification.js"></script>
+    <script src="../lib/panel-model.js"></script>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

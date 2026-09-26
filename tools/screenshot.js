@@ -3,7 +3,7 @@
 // Captures three views and composites each onto a 1280x800 canvas:
 //   1. Consent and managed-configuration page
 //   2. Status-focused popup
-//   3. Static in-call panel preview (no real Meet call needed)
+//   3. The real side panel beside a mock Meet call (no real call needed)
 //
 // Output: ./screenshots/options.png, popup.png, in-call.png
 //
@@ -131,9 +131,66 @@ async function capturePopup(context, extensionId) {
   await page.close();
 }
 
+// One meeting, as the Meet page would have pushed it to the panel.
+const SNAPSHOT = {
+  status: "active",
+  audioActive: true,
+  analysisEnabled: true,
+  classificationEnabled: true,
+  liveAnalysis: false,
+  collaborator: { email: "ana.souza@sippulse.com" },
+  meetingId: "abc-defg-hij",
+  meetingStartedAt: new Date(Date.now() - 14 * 60_000).toISOString(),
+  utterances: [
+    ["Jane Doe", "Obrigado por entrarem. Vamos começar pela revisão do pipeline de vendas.", 12, 5.5],
+    ["Ana Souza", "Fechamos três provedores novos em agosto, e a Vivanet pediu proposta para 20 mil assinantes.", 18.2, 7.7],
+    ["Jane Doe", "Qual é o prazo que eles deram para a proposta?", 26.5, 2.5],
+    ["Ana Souza", "Até sexta-feira. Eu envio a proposta e o Bruno cuida da parte técnica do SBC.", 29.6, 5.5],
+    ["Jane Doe", "Só acho que o desconto que eles pediram está alto demais.", 35.8, 4.6],
+  ].map(([speaker, text, start, duration], index) => ({
+    segment_id: index + 1,
+    speaker,
+    text,
+    start: new Date(Date.now() - 14 * 60_000 + start * 1000).toISOString(),
+    duration,
+  })),
+  classifications: {
+    2: { intent: "purchase_interest", intent_confidence: 0.82, sentiment: 0.55, action_item: 0.1 },
+    3: { intent: "question", intent_confidence: 1, sentiment: 0, action_item: 0.04 },
+    4: { intent: "commitment", intent_confidence: 0.98, sentiment: 0.1, action_item: 0.97 },
+    5: { intent: "objection", intent_confidence: 0.9, sentiment: -0.45, action_item: 0.02 },
+  },
+  interim: {},
+  analysis: null,
+  analysisAt: null,
+  analysisError: "",
+  transcriptionState: "",
+};
+
 async function capturePanel(context) {
   const page = await context.newPage();
   await page.setViewportSize({ width: TARGET_W, height: TARGET_H });
+  // Applies to the iframe too, before its scripts run: the panel renders the
+  // shipped code against this one snapshot.
+  await page.addInitScript((snapshot) => {
+    window.chrome = {
+      runtime: {
+        lastError: null,
+        getURL: (file) => file,
+        openOptionsPage() {},
+        sendMessage: async () => ({ ok: true }),
+      },
+      tabs: {
+        query: async () => [{ id: 1, url: "https://meet.google.com/abc-defg-hij" }],
+        create: async () => {},
+        connect: () => ({
+          onMessage: { addListener: (fn) => fn({ type: "panel_state", snapshot }) },
+          onDisconnect: { addListener: () => {} },
+          postMessage: () => {},
+        }),
+      },
+    };
+  }, SNAPSHOT);
   const fileUrl = "file://" + path.join(ROOT, "tools", "panel-preview.html");
   await page.goto(fileUrl, { waitUntil: "load" });
   await page.bringToFront();

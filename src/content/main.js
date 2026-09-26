@@ -3,9 +3,9 @@
 
 (function () {
   const ns = (window.MeetVcon = window.MeetVcon || {});
-  const { log, selectors, storage, captionsWatchdog, transcriptCapture, inCallPanel } = ns;
+  const { log, selectors, storage, captionsWatchdog, transcriptCapture, panelBridge } = ns;
 
-  if (!storage || !captionsWatchdog || !transcriptCapture || !inCallPanel) {
+  if (!storage || !captionsWatchdog || !transcriptCapture || !panelBridge) {
     console.error("[SipPulse Meet] initialization failed", Object.keys(ns));
     return;
   }
@@ -44,7 +44,7 @@
     currentMeetingId = transcriptCapture.meetingIdFromUrl();
     const { status, state, detail } = await capturePrerequisite(currentMeetingId);
     if (status !== "ready") {
-      inCallPanel.lock(status, detail || "");
+      panelBridge.lock(status, detail || "");
       return;
     }
 
@@ -54,12 +54,12 @@
     const meeting = await transcriptCapture.startMeeting();
     captureRunning = !!meeting;
     if (!meeting) {
-      inCallPanel.lock("capture_error");
+      panelBridge.lock("capture_error");
       return;
     }
     const live = state.liveSessions?.[meeting.meetingId];
     if (live) transcriptCapture.startLive(live.streamStartedAt);
-    inCallPanel.setAudioActive(!!live, {
+    panelBridge.setAudioActive(!!live, {
       analysisEnabled: state.config.analysisReady,
       classificationEnabled: state.config.classificationReady,
       liveAnalysis: state.config.analysisMode === "live",
@@ -74,16 +74,15 @@
     captionsWatchdog.optOut();
     captionsWatchdog.stop();
     transcriptCapture.stop();
-    inCallPanel.setAudioActive(false);
-    inCallPanel.lock("discarded");
+    panelBridge.setAudioActive(false);
+    panelBridge.lock("discarded");
     await transcriptCapture.cancelMeeting();
   }
 
   async function enterCall() {
     const state = await chrome.runtime.sendMessage({ type: "get_popup_state" }).catch(() => null);
-    inCallPanel.init({
+    panelBridge.init({
       onDiscard: discardForCall,
-      onOpenSetup: () => chrome.runtime.openOptionsPage(),
       collaborator: state?.collaboratorEmail ? { email: state.collaboratorEmail } : null,
     });
     await startCapture();
@@ -100,7 +99,7 @@
     } finally {
       captureRunning = false;
       currentMeetingId = null;
-      inCallPanel.destroy();
+      panelBridge.destroy();
       if (meetingId) {
         chrome.runtime.sendMessage({ type: "call_left", meetingId }).catch(() => {});
       }
@@ -118,7 +117,7 @@
       else await leaveCall();
     } catch (error) {
       log.error("call transition failed", error);
-      if (inCall) inCallPanel.lock("capture_error");
+      if (inCall) panelBridge.lock("capture_error");
     } finally {
       transitionRunning = false;
     }
@@ -128,7 +127,7 @@
     if (!message?.meetingId || message.meetingId !== currentMeetingId || !captureRunning) return;
     if (message.type === "ai_capture_state") {
       if (message.active) transcriptCapture.startLive(message.streamStartedAt);
-      inCallPanel.setAudioActive(!!message.active, {
+      panelBridge.setAudioActive(!!message.active, {
         analysisEnabled: message.analysisEnabled,
         classificationEnabled: message.classificationEnabled,
         liveAnalysis: message.liveAnalysis,

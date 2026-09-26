@@ -1,12 +1,11 @@
 // End-to-end check of the live pipeline against the real services: the
 // actual offscreen recorder runs in Chromium, streams a synthetic two-voice
-// Portuguese meeting to the configured transcription provider, classifies
-// each line with Jev, writes live notes and the final report with SipPulse
-// AI, and prints the result.
+// Portuguese meeting to the SipPulse AI gateway, classifies each line with
+// Jev, writes live notes and the final report with SipPulse AI, and prints
+// the result.
 //
 // Reads from the environment or .env (keys are passed to the page and never
-// printed): TRANSCRIPTION_PROVIDER (deepgram | sippulse_ai), TRANSCRIPTION_URL,
-// TRANSCRIPTION_API_KEY, SIPPULSE_AI_URL, SIPPULSE_AI_API_KEY (also used for
+// printed): SIPPULSE_AI_URL, SIPPULSE_AI_API_KEY (transcription, notes, and
 // the TTS that voices the meeting), TYPESAFE_URL, TYPESAFE_AI_KEY.
 //
 //   npm run e2e:live
@@ -38,19 +37,12 @@ function readKeys() {
     }
   }
   const names = {
-    transcriptionProvider: "TRANSCRIPTION_PROVIDER",
-    transcriptionUrl: "TRANSCRIPTION_URL",
-    transcription: "TRANSCRIPTION_API_KEY",
     sippulseUrl: "SIPPULSE_AI_URL",
     sippulse: "SIPPULSE_AI_API_KEY",
     typesafeUrl: "TYPESAFE_URL",
     typesafe: "TYPESAFE_AI_KEY",
   };
   const settings = Object.fromEntries(Object.entries(names).map(([key, name]) => [key, env[name]]));
-  // A Deepgram key kept under its usual name also works.
-  if (!settings.transcription && settings.transcriptionProvider === "deepgram") {
-    settings.transcription = env.DEEPGRAM_API_KEY;
-  }
   const missing = Object.entries(names).filter(([key]) => !settings[key]).map(([, name]) => name);
   if (missing.length) throw new Error(`Set ${missing.join(", ")}`);
   return settings;
@@ -131,9 +123,6 @@ async function main() {
     const started = await page.evaluate(
       async ({ keys, collaborator, analysisMode }) => {
         const config = window.MeetVcon.config.normalize({
-          TranscriptionProvider: keys.transcriptionProvider,
-          TranscriptionUrl: keys.transcriptionUrl,
-          TranscriptionApiKey: keys.transcription,
           SipPulseAiUrl: keys.sippulseUrl,
           SipPulseAiApiKey: keys.sippulse,
           TypeSafeUrl: keys.typesafeUrl,
@@ -148,7 +137,6 @@ async function main() {
           collaborator,
           captions: [],
           config: {
-            transcriptionApiKey: keys.transcription,
             sippulseAiApiKey: keys.sippulse,
             typesafeApiKey: keys.typesafe,
             transcription: config.transcription,

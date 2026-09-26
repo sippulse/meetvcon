@@ -15,8 +15,6 @@
 //   (/v1/openai/chat/completions), one key for both.
 // - AllowedEmailDomains (optional): restricts which Chrome profiles may
 //   capture; unset, any signed-in profile may.
-// - TranscriptionProvider/Url/ApiKey (optional): send transcription somewhere
-//   other than SipPulse AI (e.g. Deepgram); default to the SipPulse AI pair.
 // - TypeSafeUrl + TypeSafeApiKey (optional): Jev inline classification.
 // - CaptureEnabled: policy-only kill switch the collaborator cannot override.
 
@@ -24,8 +22,7 @@
   const ns = (root.MeetVcon = root.MeetVcon || {});
   if (ns.config) return;
 
-  // Streaming model choices per provider live in src/lib/transcription.js.
-  const TRANSCRIPTION_PROVIDERS = Object.freeze(["deepgram", "sippulse_ai"]);
+  // The streaming model and its parameters live in src/lib/transcription.js.
   // "final": notes and per-line classification run once, when the call ends.
   // "live": notes refresh during the call and each finished line is classified
   // as it lands (tags in the panel).
@@ -45,9 +42,6 @@
   const DEFAULTS = Object.freeze({
     sippulseAiUrl: DEFAULT_SIPPULSE_AI_URL,
     analysisMode: "final",
-    // SipPulse AI's streaming model is in production; Deepgram is the
-    // alternative for organizations that want multilingual transcription.
-    transcriptionProvider: "sippulse_ai",
     captureEnabled: true,
     // Empty = no restriction on which signed-in profile may capture.
     allowedEmailDomains: [],
@@ -58,16 +52,13 @@
     "HmacSecret",
     "AllowedEmailDomains",
     "AnalysisMode",
-    "TranscriptionProvider",
-    "TranscriptionUrl",
-    "TranscriptionApiKey",
     "SipPulseAiUrl",
     "SipPulseAiApiKey",
     "TypeSafeUrl",
     "TypeSafeApiKey",
   ]);
-  const SECRET_FIELDS = Object.freeze(["HmacSecret", "TranscriptionApiKey", "SipPulseAiApiKey", "TypeSafeApiKey"]);
-  const URL_FIELDS = Object.freeze(["EndpointUrl", "TranscriptionUrl", "SipPulseAiUrl", "TypeSafeUrl"]);
+  const SECRET_FIELDS = Object.freeze(["HmacSecret", "SipPulseAiApiKey", "TypeSafeApiKey"]);
+  const URL_FIELDS = Object.freeze(["EndpointUrl", "SipPulseAiUrl", "TypeSafeUrl"]);
 
   const text = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -153,10 +144,6 @@
     for (const field of URL_FIELDS) {
       if (isSet(raw[field]) && !httpsUrl(raw[field])) errors[field] = `${field} must be an https:// URL`;
     }
-    const provider = text(raw.TranscriptionProvider) || DEFAULTS.transcriptionProvider;
-    if (!TRANSCRIPTION_PROVIDERS.includes(provider)) {
-      errors.TranscriptionProvider = `TranscriptionProvider must be one of ${TRANSCRIPTION_PROVIDERS.join(", ")}`;
-    }
     const analysisMode = text(raw.AnalysisMode) || DEFAULTS.analysisMode;
     if (!ANALYSIS_MODES.includes(analysisMode)) {
       errors.AnalysisMode = `AnalysisMode must be one of ${ANALYSIS_MODES.join(", ")}`;
@@ -164,12 +151,6 @@
     const store = withoutTrailingSlash(raw.EndpointUrl);
     // An invalid URL is reported, never silently replaced by the default.
     const sippulse = isSet(raw.SipPulseAiUrl) ? withoutTrailingSlash(raw.SipPulseAiUrl) : DEFAULTS.sippulseAiUrl;
-    // SipPulse AI serves streaming transcription and notes from one API with
-    // one key, so an organization on SipPulse configures only SipPulseAi*.
-    // TranscriptionUrl/ApiKey exist to point transcription somewhere else
-    // (Deepgram, or a self-hosted gateway).
-    const streamBase = withoutTrailingSlash(raw.TranscriptionUrl) || sippulse;
-    const transcriptionApiKey = text(raw.TranscriptionApiKey) || text(raw.SipPulseAiApiKey);
     const typesafe = withoutTrailingSlash(raw.TypeSafeUrl);
     const allowedEmailDomains = normalizeDomains(raw.AllowedEmailDomains);
     const hmacSecret = text(raw.HmacSecret);
@@ -185,9 +166,6 @@
     return {
       endpointUrl: store,
       hmacSecret,
-      transcriptionUrl: streamBase,
-      // The key travels with the rest of the transcription settings.
-      transcriptionApiKey,
       sippulseAiUrl: sippulse,
       sippulseAiApiKey,
       typesafeUrl: typesafe,
@@ -201,14 +179,15 @@
         errors.SipPulseAiUrl ||
         (configured ? "" : `Configure ${missing.join(", ")} in Google Admin or in Settings`),
       errors,
-      liveTranscriptionReady: !!streamBase && !!transcriptionApiKey && !errors.TranscriptionProvider,
+      // SipPulse AI serves streaming transcription and notes from one API
+      // with one key.
+      liveTranscriptionReady: !!sippulse && !!sippulseAiApiKey,
       analysisReady: !!sippulse && !!sippulseAiApiKey,
       classificationReady: !!typesafe && !!typesafeApiKey,
       transcription: {
-        provider,
-        apiBase: streamBase,
-        streamBase: streamBase.replace(/^https:/, "wss:"),
-        apiKey: transcriptionApiKey,
+        apiBase: sippulse,
+        streamBase: sippulse.replace(/^https:/, "wss:"),
+        apiKey: sippulseAiApiKey,
       },
       analysisMode,
       analysis: {
@@ -218,12 +197,7 @@
       },
       classification: { ...CLASSIFICATION, apiBase: typesafe ? `${typesafe}/v1` : "" },
       // From the resolved URLs, so the default SipPulse AI host is included.
-      origins: originsFor({
-        EndpointUrl: store,
-        TranscriptionUrl: streamBase,
-        SipPulseAiUrl: sippulse,
-        TypeSafeUrl: typesafe,
-      }),
+      origins: originsFor({ EndpointUrl: store, SipPulseAiUrl: sippulse, TypeSafeUrl: typesafe }),
     };
   }
 
@@ -244,7 +218,6 @@
   ns.config = {
     DEFAULTS,
     DEFAULT_SIPPULSE_AI_URL,
-    TRANSCRIPTION_PROVIDERS,
     ANALYSIS_MODES,
     ANALYSIS,
     CLASSIFICATION,

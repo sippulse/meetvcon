@@ -22,15 +22,15 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
    in the encrypted local recovery record until final delivery.
 3. The collaborator starts live transcription with one extension action. The
    Meet tab (remote participants) and local microphone stream as separate mono
-   streams to the configured `/v1/listen` provider — the SipPulse AI streaming
-   gateway (`pulse-stt-streaming-v1`, pt-BR) by default, or Deepgram nova-3
-   (multilingual, diarized) — and the panel stays visible throughout.
+   streams over `/v1/listen` to the SipPulse AI gateway
+   (`pulse-stt-streaming-v1`, pt-BR). It starts from the side panel, which
+   stays open beside the call.
 4. `AnalysisMode` decides when the models run. The default, `final`, keeps the
    call itself free of model calls: nothing is classified or summarized until
    the meeting ends. `live` additionally classifies every transcript line with
    TypeSafe's Jev model (intent, sentiment, action item) within about a second
    and refreshes the notes about every minute.
-5. The in-call panel shows the live transcript, per-speaker talk time, and — in
+5. The side panel shows the live transcript, per-speaker talk time, and — in
    `live` mode — intent tags and running notes. Remote speakers are named from
    Meet captions when possible.
 6. When the call ends, the full transcript is analyzed by SipPulse AI

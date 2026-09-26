@@ -19,10 +19,8 @@ microphone.
 Data is used only for the stated transcription, analysis, and delivery
 purpose. Processors:
 
-- **The transcription provider** — SipPulse AI's streaming service by
-  default, or Deepgram if the organization configures it — receives the live
-  audio stream and returns the transcript. Deepgram streams opt out of its
-  model-improvement program.
+- **SipPulse AI's streaming service** receives the live audio stream and
+  returns the transcript.
 - **SipPulse AI** receives transcript text during and after the call to write
   notes: summary, topics, action items, decisions, and open questions.
 - **TypeSafe** receives each transcript line, with the line before it, and
@@ -44,6 +42,7 @@ after successful delivery or when the collaborator discards them. CRM and email 
 
 Capture begins only after the collaborator accepts the in-product disclosure.
 Live transcription additionally requires an explicit action for every
-meeting. The in-call panel remains visible and can stop and discard that call.
+meeting. The side panel shows the capture state and can stop and discard that
+call.
 Collaborators are responsible for informing participants and following company
 policy and applicable law. Privacy and security questions: security@sippulse.com.

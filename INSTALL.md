@@ -30,9 +30,6 @@ Each setting is read from two places, field by field:
 | `SipPulseAiUrl` | HTTPS base of SipPulse AI. Defaults to `https://api.sippulse.ai` |
 | `AllowedEmailDomains` | Restrict which Chrome profiles may capture, e.g. `["sippulse.com"]`. Unset, any signed-in profile may |
 | `AnalysisMode` | `final` (default) analyses once, when the call ends. `live` also analyses during the call: notes every minute and a tag per line, at a higher cost |
-| `TranscriptionProvider` | `sippulse_ai` (default; pt-BR) or `deepgram` (nova-3, multilingual, diarized) |
-| `TranscriptionUrl` | Only to transcribe somewhere other than SipPulse AI, e.g. `https://api.deepgram.com`. Defaults to the SipPulse AI URL |
-| `TranscriptionApiKey` | Key for `TranscriptionUrl`. Defaults to `SipPulseAiApiKey` |
 | `TypeSafeUrl` + `TypeSafeApiKey` | Intent, sentiment and action-item classification with TypeSafe Jev, e.g. `https://api.typesafe.ai`. No default: classification is off unless set |
 | `CaptureEnabled` | `false` disables capture (policy only) |
 
@@ -163,11 +160,10 @@ discard behavior have passed the pilot checklist.
 2. Confirm capture stays off before consent, and for a profile outside
    `AllowedEmailDomains` when that is set. Upgrading from 0.2 must ask for
    consent again.
-3. Join Meet and verify the visible panel shows Google captions in the
-   Transcript tab.
-4. Click the extension and choose **Start live transcription & notes**. On
-   first use a tab asks for microphone access; allow it, return to Meet, and
-   start again.
+3. Join Meet, click the extension and choose **Open the meeting panel**;
+   verify the side panel shows Google captions in the Transcript tab.
+4. In the side panel choose **Start live transcription**. On first use a tab
+   asks for microphone access; allow it, return to Meet, and start again.
 5. Confirm remote audio remains audible, the panel shows "Live transcription
    on", your lines appear under your name, and remote lines under their Meet
    names within about two seconds. Within another second, lines get tags

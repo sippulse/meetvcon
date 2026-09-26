@@ -1,7 +1,7 @@
 # SipPulse Meet Capture
 
 Internal Chrome extension for live Google Meet transcription and meeting
-intelligence. While the call runs, the in-call panel shows a live,
+intelligence. While the call runs, Chrome's side panel shows a live,
 speaker-labelled transcript, AI notes (summary, action items, topics,
 intents), and talk time with sentiment per speaker. When the call ends, one vCon
 with the transcript and meeting report is stored in SipPulse CRM and emailed
@@ -14,8 +14,7 @@ to the capturing collaborator (`@sippulse.com` by default; the
   the extension action once during the meeting. The offscreen recorder
   streams the collaborator's microphone and the Meet tab as two mono streams
   over the `/v1/listen` protocol to the SipPulse AI gateway
-  (`pulse-stt-streaming-v1`, pt-BR), or to Deepgram (nova-3, multilingual,
-  diarized) when configured. Remote voices are named from Google Meet
+  (`pulse-stt-streaming-v1`, pt-BR). Remote voices are named from Google Meet
   caption labels. No audio is stored.
 - **Inline classification (TypeSafe Jev, optional):** each final line is classified in
   about 300 ms — intent (commitment, decision, question, objection, buying
@@ -30,8 +29,9 @@ to the capturing collaborator (`@sippulse.com` by default; the
   the final transcript if live transcription was not started or failed.
 
 Audio capture cannot start silently: Chrome requires an explicit extension
-action for `tabCapture`. A visible Meet panel always shows the capture state and
-can stop and discard the current call.
+action for `tabCapture`. The side panel shows the capture state and can stop and
+discard the current call. Open it from the extension popup, or from Chrome's
+side panel menu.
 
 ## Development
 

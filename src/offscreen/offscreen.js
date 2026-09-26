@@ -1,7 +1,7 @@
 // Live meeting capture, started only by an explicit user action. The
 // collaborator's microphone (channel 0) and the Meet tab audio (channel 1)
 // each stream as mono linear16 over their own /v1/listen WebSocket to the
-// configured provider (Deepgram or the SipPulse AI gateway); no audio is
+// SipPulse AI streaming gateway; no audio is
 // stored. Final transcript segments and periodic
 // SipPulse AI notes are sent to the service worker as "live_update" messages,
 // which it relays to the Meet tab. When the meeting ends, the final transcript
@@ -123,7 +123,7 @@ function sendAudio(current, stream, buffer) {
 }
 
 function connect(current, stream) {
-  const socket = new WebSocket(transcription.listenUrl(current.config.transcription), [
+  const socket = new WebSocket(transcription.listenUrl(current.config.transcription.streamBase), [
     "token",
     current.config.transcription.apiKey,
   ]);
@@ -386,8 +386,7 @@ async function startCapture(message) {
   if (session) {
     return { ok: false, error: "Another meeting is already being captured", code: "busy" };
   }
-  const profile = transcription.profile(message.config?.transcription?.provider);
-  if (!message.config?.transcription?.apiKey || !message.config?.transcription?.streamBase || !profile) {
+  if (!message.config?.transcription?.apiKey || !message.config?.transcription?.streamBase) {
     return { ok: false, error: "Live transcription is not configured", code: "not_configured" };
   }
   const streams = await openStreams(message.streamId);
@@ -402,7 +401,7 @@ async function startCapture(message) {
     captions: message.captions || [],
     tabStream: streams.tabStream,
     microphoneStream: streams.microphoneStream,
-    profile,
+    profile: transcription.PROFILE,
     streamStartedAt: new Date().toISOString(),
     streams: Object.fromEntries(
       transcription.CHANNELS.map((channel) => [

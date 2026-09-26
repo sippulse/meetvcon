@@ -16,6 +16,7 @@
     "identity",
     "identity.email",
     "offscreen",
+    "sidePanel",
     "tabCapture"
   ],
   "host_permissions": [
@@ -41,18 +42,17 @@
         "src/lib/vcon.js",
         "src/lib/captions.js",
         "src/lib/transcription.js",
-        "src/lib/classification.js",
         "src/content/captions-watchdog.js",
         "src/content/transcript-capture.js",
-        "src/content/in-call-panel.js",
+        "src/content/panel-bridge.js",
         "src/content/main.js"
-      ],
-      "css": [
-        "src/content/panel.css"
       ],
       "run_at": "document_idle"
     }
   ],
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
   "options_ui": {
     "page": "src/options/options.html",
     "open_in_tab": true

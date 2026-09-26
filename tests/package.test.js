@@ -11,9 +11,10 @@ test("manifest references existing packaged files", () => {
     manifest.background.service_worker,
     manifest.options_ui.page,
     manifest.action.default_popup,
+    manifest.side_panel.default_path,
     manifest.storage.managed_schema,
     ...Object.values(manifest.icons),
-    ...manifest.content_scripts.flatMap((entry) => [...entry.js, ...entry.css]),
+    ...manifest.content_scripts.flatMap((entry) => [...entry.js, ...(entry.css || [])]),
     "src/offscreen/offscreen.html",
     "src/offscreen/pcm-worklet.js",
     "src/permissions/microphone.html",
@@ -33,6 +34,7 @@ test("extension pages reference existing local assets", () => {
   for (const htmlPath of [
     "src/options/options.html",
     "src/popup/popup.html",
+    "src/sidepanel/sidepanel.html",
     "src/offscreen/offscreen.html",
     "src/permissions/microphone.html",
   ]) {
