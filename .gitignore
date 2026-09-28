@@ -38,5 +38,9 @@ chrome-profile/
 # Local Claude Code settings (permission allowlist, per developer)
 .claude/
 
+# Generated documents. The manuals are written in docs/*.md and the datasheet
+# is built from the template in the sippulse-website repo; the PDFs are output.
+docs/pdf/
+
 # Raw screenshot intermediates (only the composited 1280x800 PNGs are committed)
 screenshots/_raw/

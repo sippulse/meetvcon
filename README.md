@@ -102,3 +102,14 @@ Three pilot limitations must be closed before broad deployment:
   Anyone holding it can post vCons to the CRM; rotate it on both sides.
 
 Report security issues privately to **security@sippulse.com**.
+
+## Documents
+
+`docs/MANUAL.md` and `docs/MANUAL.pt-BR.md` are the user manual, and
+`docs/pdf/` holds them as PDFs beside the datasheet. The datasheet has no
+Markdown source here: it is built from the SipPulse datasheet template in the
+sibling `sippulse-website` repository
+(`scripts/generate-datasheet-pdf.ts`, slugs `meetvcon` and `meetvcon-en`), so
+it stays in the same layout as every other product's. Regenerate it there with
+`npx tsx scripts/generate-datasheet-pdf.ts meetvcon meetvcon-en` and copy the
+result into `docs/pdf/`.
