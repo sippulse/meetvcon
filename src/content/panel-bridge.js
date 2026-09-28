@@ -24,6 +24,9 @@
   let liveAnalysis = false;
   let classificationEnabled = false;
   let collaborator = null;
+  // The call is being captured. Independent of whether Google captions happen
+  // to be on, which is what the watchdog status reports.
+  let captureRunning = false;
   const ports = new Set();
   let unsubscribe = [];
   let refreshTimer = null;
@@ -51,6 +54,8 @@
     return {
       status: currentStatus,
       statusDetail,
+      captureRunning,
+      captionsOn: currentStatus === "active",
       audioActive,
       analysisEnabled,
       liveAnalysis,
@@ -120,6 +125,11 @@
     push();
   }
 
+  function setCaptureRunning(running) {
+    captureRunning = !!running;
+    push();
+  }
+
   function setAudioActive(isActive, options = {}) {
     audioActive = !!isActive;
     if ("analysisEnabled" in options) analysisEnabled = !!options.analysisEnabled;
@@ -133,6 +143,7 @@
     collaborator = nextHandlers.collaborator || null;
     locked = false;
     audioActive = false;
+    captureRunning = false;
     currentStatus = "idle";
     statusDetail = "";
     unsubscribe.forEach((fn) => fn());
@@ -154,9 +165,10 @@
     unsubscribe = [];
     locked = false;
     audioActive = false;
+    captureRunning = false;
     currentStatus = "idle";
     push();
   }
 
-  ns.panelBridge = { init, destroy, lock, setAudioActive, snapshot };
+  ns.panelBridge = { init, destroy, lock, setCaptureRunning, setAudioActive, snapshot };
 })();

@@ -57,9 +57,11 @@ Nada é desenhado por cima da página do Meet. O painel é a interface.
 Clique em **Start live transcription** no painel. A linha de status fica
 vermelha e diz *Live transcription on (tab audio + microphone)*.
 
-Enquanto você não clicar, a extensão captura só as legendas do próprio Google,
-que são a rede de segurança: sem separação da sua voz pelo microfone e sem
-notas de IA.
+Enquanto você não clicar, a extensão só lê as legendas do próprio Google, e
+apenas se você as tiver ligado. Essa rede de segurança não separa a sua voz
+pelo microfone e não gera notas de IA. A extensão nunca liga as legendas por
+você, então se você deixar o CC desligado e não iniciar a transcrição ao vivo,
+nada é capturado.
 
 ### As três abas
 

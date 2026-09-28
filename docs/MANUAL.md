@@ -56,8 +56,11 @@ Nothing is drawn on top of the Meet page. The panel is the interface.
 Click **Start live transcription** in the panel. The status line turns red and
 reads *Live transcription on (tab audio + microphone)*.
 
-Until you click it, the extension only captures Google's own captions, which
-is a fallback: no speaker separation from your microphone, no AI notes.
+Until you click it, the extension only reads Google's own captions, and only
+when you have them on. That fallback has no speaker separation from your
+microphone and no AI notes. The extension never turns captions on for you, so
+if you leave them off and never start live transcription, nothing is
+captured.
 
 ### The three tabs
 

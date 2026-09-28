@@ -15,6 +15,8 @@ const at = (seconds) => new Date(Date.parse(START) + seconds * 1000).toISOString
 function snapshot(overrides = {}) {
   return {
     status: "active",
+    captureRunning: true,
+    captionsOn: true,
     audioActive: true,
     analysisEnabled: true,
     classificationEnabled: true,
@@ -40,13 +42,18 @@ test("the header says what is happening, and streaming trouble is visible", () =
   const panelModel = load();
   assert.deepEqual(plain(panelModel.build(snapshot()).header), {
     tone: "red",
-    text: "Live transcription on (tab audio + microphone)",
+    text: "SipPulse AI is transcribing (tab audio + microphone)",
   });
   assert.equal(panelModel.build(snapshot({ transcriptionState: "reconnecting" })).header.tone, "amber");
   assert.equal(
-    panelModel.build(snapshot({ audioActive: false, status: "active" })).header.text,
-    "Capturing Google captions"
+    panelModel.build(snapshot({ audioActive: false })).header.text,
+    "Capturing Google captions",
+    "captions are on and nothing is streaming"
   );
+  // Captions off is not a failure, and must not hide the start button.
+  const noCaptions = panelModel.build(snapshot({ audioActive: false, captionsOn: false, status: "off" }));
+  assert.equal(noCaptions.header.text, "Ready. Start live transcription to capture this call");
+  assert.equal(noCaptions.canStart, true, "the start button does not depend on Google captions");
   // A blocked state explains itself instead of saying "no consent yet".
   assert.equal(
     panelModel.build({ status: "managed_disabled", statusDetail: "Set the vCon store endpoint" }).header.text,

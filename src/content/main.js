@@ -48,11 +48,11 @@
       return;
     }
 
-    captionsWatchdog.clearOptOut();
     captionsWatchdog.start();
     transcriptCapture.start();
     const meeting = await transcriptCapture.startMeeting();
     captureRunning = !!meeting;
+    panelBridge.setCaptureRunning(captureRunning);
     if (!meeting) {
       panelBridge.lock("capture_error");
       return;
@@ -71,9 +71,9 @@
   async function discardForCall() {
     if (!captureRunning) return;
     captureRunning = false;
-    captionsWatchdog.optOut();
     captionsWatchdog.stop();
     transcriptCapture.stop();
+    panelBridge.setCaptureRunning(false);
     panelBridge.setAudioActive(false);
     panelBridge.lock("discarded");
     await transcriptCapture.cancelMeeting();

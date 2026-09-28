@@ -18,8 +18,11 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
    disclosure (consent version 2, which names SipPulse AI and TypeSafe) and
    Chrome reports a signed-in profile on an allowed domain (`sippulse.com`
    unless `AllowedEmailDomains` policy says otherwise).
-2. Google captions provide an automatic, speaker-labelled fallback stored only
-   in the encrypted local recovery record until final delivery.
+2. Google captions are read when the collaborator has them on, and stored only
+   in the encrypted local recovery record until final delivery. The extension
+   never turns captions on: forcing them changed what every participant saw on
+   screen. Their labels are what name remote speakers, so a call captured
+   without captions records remote speech as *Participant*.
 3. The collaborator starts live transcription with one extension action. The
    Meet tab (remote participants) and local microphone stream as separate mono
    streams over `/v1/listen` to the SipPulse AI gateway

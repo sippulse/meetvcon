@@ -24,9 +24,10 @@ to the capturing collaborator (`@sippulse.com` by default; the
   sent to SipPulse AI (`deepseek-v4.1-flash`, OpenAI-compatible API) for live
   notes; after the call the full transcript produces the final report,
   stored in the vCon's `analysis[]` with the Jev intents and sentiment.
-- **Google captions (fallback):** captions are captured continuously into an
-  encrypted local recovery record. They name remote speakers and become
-  the final transcript if live transcription was not started or failed.
+- **Google captions (fallback):** when the collaborator has captions on, their
+  text is read into an encrypted local recovery record. It names remote
+  speakers and becomes the final transcript if live transcription was not
+  started or failed. The extension never switches captions on by itself.
 
 Audio capture cannot start silently: Chrome requires an explicit extension
 action for `tabCapture`. The side panel shows the capture state and can stop and

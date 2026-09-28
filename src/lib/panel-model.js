@@ -30,7 +30,7 @@
 
   const STATES = {
     active: ["green", "Capturing Google captions"],
-    enabling: ["amber", "Enabling Google captions…"],
+    off: ["grey", "Ready. Start live transcription to capture this call"],
     discarded: ["grey", "Stopped. Nothing from this call will be delivered"],
     setup_required: ["amber", "Consent is required before capture"],
     identity_required: ["amber", "Sign in to Chrome with an allowed account"],
@@ -42,20 +42,29 @@
 
   const list = (value) => (Array.isArray(value) ? value : []);
 
-  function capturing(status) {
-    return status === "active" || status === "enabling";
+  // Whether the call is being captured, which is not the same question as
+  // whether Google's captions happen to be on. Tying the two together left the
+  // panel with no start button whenever the user turned captions off.
+  function capturing(snapshot) {
+    return !!snapshot.captureRunning;
   }
 
   function header(snapshot) {
     // A missing key or endpoint is worth saying before the meeting starts, not
     // after someone waits for a transcript that was never going to come.
     if (snapshot.configError) return { tone: "amber", text: snapshot.configError };
-    if (snapshot.audioActive && capturing(snapshot.status)) {
+    if (snapshot.audioActive) {
       const stream = snapshot.transcriptionState;
       if (stream === "reconnecting" || stream === "error") {
-        return { tone: "amber", text: "Reconnecting to live transcription…" };
+        return { tone: "amber", text: "Reconnecting to SipPulse AI…" };
       }
-      return { tone: "red", text: "Live transcription on (tab audio + microphone)" };
+      return { tone: "red", text: "SipPulse AI is transcribing (tab audio + microphone)" };
+    }
+    // In a call, with nothing streaming: say which of the two is capturing.
+    if (capturing(snapshot)) {
+      return snapshot.captionsOn
+        ? { tone: "green", text: STATES.active[1] }
+        : { tone: "grey", text: STATES.off[1] };
     }
     const [tone, text] = STATES[snapshot.status] || STATES.capture_error;
     return { tone, text: snapshot.statusDetail ? `${text} — ${snapshot.statusDetail}` : text };
@@ -63,7 +72,7 @@
 
   function action(snapshot) {
     if (snapshot.configError) return { id: "setup", label: "Open settings" };
-    if (capturing(snapshot.status)) return { id: "discard", label: "Stop and discard this call" };
+    if (capturing(snapshot)) return { id: "discard", label: "Stop and discard this call" };
     if (["setup_required", "identity_required", "managed_disabled"].includes(snapshot.status)) {
       return { id: "setup", label: "Review setup" };
     }
@@ -115,6 +124,12 @@
         : snapshot.audioActive
         ? "Listening… the transcript appears as people speak."
         : "No speech captured yet. Start live transcription for accuracy, speaker names, and AI notes.",
+      // Nobody should have to guess who wrote these lines.
+      source: !lines.length
+        ? ""
+        : snapshot.audioActive
+        ? "Written by SipPulse AI from the call audio"
+        : "Copied from Google's captions. Start live transcription for speaker names and AI notes.",
       lines,
     };
   }
@@ -225,12 +240,12 @@
     const state = { status: "idle", ...snapshot };
     return {
       header: header(state),
-      showViews: capturing(state.status) || state.audioActive || list(state.utterances).length > 0,
+      showViews: capturing(state) || state.audioActive || list(state.utterances).length > 0,
       // Capture only runs once consent, identity and configuration passed, so
       // "capturing but no audio yet" is exactly when live transcription can
       // start. liveReady comes from the worker: without a key there is nothing
       // to start, and the panel says so instead of offering a button that fails.
-      canStart: capturing(state.status) && !state.audioActive && state.liveReady !== false,
+      canStart: capturing(state) && !state.audioActive && state.liveReady !== false,
       // Stopping is not discarding. The transcript stays, and starting again
       // continues it.
       canStop: !!state.audioActive,

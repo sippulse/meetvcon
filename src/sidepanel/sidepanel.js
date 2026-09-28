@@ -180,6 +180,7 @@ function renderTabs() {
 
 function renderTranscript(view) {
   if (view.empty) elements.body.append(el("p", "empty", view.empty));
+  if (view.source) elements.body.append(el("p", "muted", view.source));
   for (const line of view.lines) {
     const node = el("div", `line${line.interim ? " line--interim" : ""}`);
     if (line.speaker) {
