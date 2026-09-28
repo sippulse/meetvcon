@@ -159,6 +159,29 @@ test("each remote segment is named from the overlapping Meet caption; unmatched 
   assert.equal(utterances[1].email, "ana.souza@sippulse.com");
 });
 
+test("with captions off, the participant tiles name the remote voices", () => {
+  const segments = [
+    { id: 1, channel: 1, speaker: null, text: "Bom dia a todos.", start: 5, end: 7, confidence: 0.9 },
+    { id: 2, channel: 1, speaker: null, text: "Oi, tudo bem?", start: 10, end: 11, confidence: 0.9 },
+    { id: 3, channel: 1, speaker: null, text: "Ninguém acendeu aqui.", start: 30, end: 31, confidence: 0.9 },
+  ];
+  // Tiles light up as the voice starts, with no caption lag to correct for.
+  const speaking = [
+    { speaker: "Jane Doe", start: "2026-09-04T12:00:05.000Z", duration: 2 },
+    { speaker: "Bruno Lima", start: "2026-09-04T12:00:09.800Z", duration: 1.4 },
+  ];
+  const utterances = transcription.toUtterances(segments, { streamStartedAt: T0, speaking });
+  assert.deepEqual(plain(utterances.map((u) => u.speaker)), ["Jane Doe", "Bruno Lima", "Participant"]);
+
+  // Captions and tiles together still agree, and "You" is never a remote name.
+  const both = transcription.toUtterances(segments, {
+    streamStartedAt: T0,
+    captions: [{ speaker: "You", text: "…", start: "2026-09-04T12:00:05.800Z", duration: 1.5 }],
+    speaking,
+  });
+  assert.deepEqual(plain(both.map((u) => u.speaker)), ["Jane Doe", "Bruno Lima", "Participant"]);
+});
+
 test("speaker stats report talk time share and turns, leaving out unnamed remote speech", () => {
   const stats = transcription.speakerStats([
     { speaker: "Ana", text: "Podemos fechar hoje?", duration: 6 },

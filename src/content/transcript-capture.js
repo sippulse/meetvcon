@@ -125,6 +125,9 @@
       ...state.meeting,
       utterances,
       captionsEnabled: !!selectors.areCaptionsActive(),
+      // Who the participant tiles showed talking, which names remote speech
+      // when captions are off.
+      speakingEvents: ns.activeSpeaker?.getEvents() || [],
     };
     if (state.live.streamStartedAt) {
       record.liveStreamStartedAt = state.live.streamStartedAt;

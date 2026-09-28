@@ -321,6 +321,7 @@ function utterancesFor(current) {
   return transcription.toUtterances(current.segments, {
     streamStartedAt: current.streamStartedAt,
     captions: current.captions,
+    speaking: current.speaking,
     collaborator: current.collaborator,
   });
 }
@@ -407,6 +408,7 @@ async function startCapture(message) {
     meetingStartedAt: message.meetingStartedAt || null,
     collaborator: message.collaborator || null,
     captions: message.captions || [],
+    speaking: message.speaking || [],
     tabStream: streams.tabStream,
     microphoneStream: streams.microphoneStream,
     profile: transcription.PROFILE,
@@ -528,6 +530,7 @@ async function stopCapture(message) {
   current.stopping = true;
   clearInterval(current.analysisTimer);
   current.captions = message.captions || current.captions;
+  current.speaking = message.speaking || current.speaking;
   current.collaborator = message.collaborator || current.collaborator;
   current.subject = message.subject || current.subject;
   await releaseAudio(current);
@@ -556,9 +559,9 @@ async function cancelCapture(meetingId) {
 }
 
 function updateCaptions(message) {
-  if (session?.meetingId === message.meetingId && Array.isArray(message.captions)) {
-    session.captions = message.captions;
-  }
+  if (session?.meetingId !== message.meetingId) return { ok: true };
+  if (Array.isArray(message.captions)) session.captions = message.captions;
+  if (Array.isArray(message.speaking)) session.speaking = message.speaking;
   return { ok: true };
 }
 

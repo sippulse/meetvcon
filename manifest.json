@@ -43,6 +43,7 @@
         "src/lib/captions.js",
         "src/lib/transcription.js",
         "src/content/captions-watchdog.js",
+        "src/content/active-speaker.js",
         "src/content/transcript-capture.js",
         "src/content/panel-bridge.js",
         "src/content/main.js"

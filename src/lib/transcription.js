@@ -234,21 +234,29 @@
 
   // Vote remote voices (or single segments) onto Google Meet caption names
   // by time overlap. captions: [{ speaker, start (ISO), duration (s) }].
-  function resolveSpeakerNames(segments, captions, streamStartedAtMs) {
-    const votes = new Map();
-    const usable = (captions || [])
-      .filter((caption) => caption.speaker && caption.speaker !== "unknown")
-      .filter((caption) => !SELF_CAPTION_LABELS.has(caption.speaker.trim().toLowerCase()))
-      .map((caption) => {
-        const start = Date.parse(caption.start);
-        // Captions render ~1 s after speech begins.
+  // Two ways to learn who was talking, both shaped {speaker, start, duration}:
+  // Google's caption labels, which lag about a second behind the voice, and
+  // the participant tiles the page watched light up, which do not. Captions
+  // only exist when the user turned them on, so the tiles are what names
+  // remote speech in a call without CC.
+  function nameWindows(entries, lagMs) {
+    return (entries || [])
+      .filter((entry) => entry.speaker && entry.speaker !== "unknown")
+      .filter((entry) => !SELF_CAPTION_LABELS.has(entry.speaker.trim().toLowerCase()))
+      .map((entry) => {
+        const start = Date.parse(entry.start);
         return {
-          name: caption.speaker,
-          start: start - 1500,
-          end: start + Math.max(1, Number(caption.duration) || 0) * 1000,
+          name: entry.speaker,
+          start: start - lagMs,
+          end: start + Math.max(1, Number(entry.duration) || 0) * 1000,
         };
       })
-      .filter((caption) => Number.isFinite(caption.start));
+      .filter((entry) => Number.isFinite(entry.start));
+  }
+
+  function resolveSpeakerNames(segments, captions, streamStartedAtMs, speaking = []) {
+    const votes = new Map();
+    const usable = [...nameWindows(captions, 1500), ...nameWindows(speaking, 0)];
 
     for (const segment of segments) {
       if (segment.channel !== TAB_CHANNEL) continue;
@@ -285,11 +293,11 @@
 
   // Turn stream-relative segments into the named, absolute-time utterances
   // that vcon.assemble() and the analysis prompt consume.
-  function toUtterances(segments, { streamStartedAt, captions = [], collaborator = null } = {}) {
+  function toUtterances(segments, { streamStartedAt, captions = [], speaking = [], collaborator = null } = {}) {
     const startedMs = Date.parse(streamStartedAt);
     if (!Number.isFinite(startedMs)) return [];
     const cleaned = dropEcho([...(segments || [])].sort((a, b) => a.start - b.start));
-    const names = resolveSpeakerNames(cleaned, captions, startedMs);
+    const names = resolveSpeakerNames(cleaned, captions, startedMs, speaking);
     const selfName = displayNameFromEmail(collaborator?.email);
     const anonymous = new Map();
     const nameFor = (segment) => {

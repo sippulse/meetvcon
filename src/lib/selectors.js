@@ -102,10 +102,52 @@
     return false;
   }
 
+  // Who is talking right now, without captions. Meet animates the little bars
+  // on a tile while that participant's microphone has level, so the signal is
+  // "this tile has a running CSS animation" rather than a class name Google
+  // reshuffles every few months. The name is the tile's own label.
+  const TILE_SELECTOR = "[data-participant-id], [data-requested-participant-id]";
+  // Words a tile may carry that are a status, not somebody's name.
+  const NOT_A_NAME = /^(you|presenting|apresentando|tú|vous|pinned|fixado|muted|sem som)$/i;
+
+  function tileName(tile) {
+    const label = (tile.getAttribute("aria-label") || "").trim();
+    if (label && !NOT_A_NAME.test(label)) return label;
+    for (const node of tile.querySelectorAll("div, span")) {
+      if (node.childElementCount) continue;
+      const text = (node.textContent || "").trim();
+      if (text && text.length <= 60 && !NOT_A_NAME.test(text)) return text;
+    }
+    return "";
+  }
+
+  function isAnimating(tile) {
+    for (const node of tile.querySelectorAll("div, span")) {
+      const style = getComputedStyle(node);
+      if (style.animationName && style.animationName !== "none" && style.visibility !== "hidden") {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Names of the tiles that look like they are speaking. Empty is a normal
+  // answer: nobody is talking, or this Meet build does not match.
+  function speakingNames() {
+    const names = [];
+    for (const tile of document.querySelectorAll(TILE_SELECTOR)) {
+      if (!isAnimating(tile)) continue;
+      const name = tileName(tile);
+      if (name && !names.includes(name)) names.push(name);
+    }
+    return names;
+  }
+
   ns.selectors = {
     findCaptionsToggleButton,
     findCaptionsOverlay,
     areCaptionsActive,
     isInCall,
+    speakingNames,
   };
 })();

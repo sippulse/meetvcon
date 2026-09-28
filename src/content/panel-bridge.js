@@ -40,6 +40,7 @@
       return transcription.toUtterances(live.segments, {
         streamStartedAt: live.streamStartedAt,
         captions: capture.getCaptionUtterances(),
+        speaking: ns.activeSpeaker?.getEvents() || [],
         collaborator,
       });
     }

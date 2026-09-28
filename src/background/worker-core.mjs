@@ -100,7 +100,12 @@ export function createWorkerCore({
     // Caption speaker names let the recorder label remote voices in its
     // live notes. Best effort: the final stop message carries them again.
     if (session?.state === "recording" && record.utterances?.length) {
-      offscreenRequest({ type: "ai_captions", meetingId: record.meetingId, captions: record.utterances });
+      offscreenRequest({
+        type: "ai_captions",
+        meetingId: record.meetingId,
+        captions: record.utterances,
+        speaking: record.speakingEvents || [],
+      });
     }
   }
 
@@ -260,6 +265,7 @@ export function createWorkerCore({
       meetingStartedAt: record.startedAt,
       collaborator: profile,
       captions: record.utterances || [],
+      speaking: record.speakingEvents || [],
       // Restarting after a stop continues the same timeline and keeps what was
       // already transcribed, so one call still delivers one transcript.
       resume:
@@ -372,6 +378,7 @@ export function createWorkerCore({
           subject: record.subject || "",
           collaborator: profile,
           captions: record.utterances || [],
+          speaking: record.speakingEvents || [],
         });
         if (response?.ok) {
           const source = transcription.sourceLabel();
@@ -444,6 +451,7 @@ export function createWorkerCore({
       ? transcription.toUtterances(record.liveSegments, {
           streamStartedAt,
           captions: record.utterances || [],
+          speaking: record.speakingEvents || [],
           collaborator: profile,
         })
       : [];

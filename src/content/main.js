@@ -3,7 +3,7 @@
 
 (function () {
   const ns = (window.MeetVcon = window.MeetVcon || {});
-  const { log, selectors, storage, captionsWatchdog, transcriptCapture, panelBridge } = ns;
+  const { log, selectors, storage, captionsWatchdog, activeSpeaker, transcriptCapture, panelBridge } = ns;
 
   if (!storage || !captionsWatchdog || !transcriptCapture || !panelBridge) {
     console.error("[SipPulse Meet] initialization failed", Object.keys(ns));
@@ -49,6 +49,7 @@
     }
 
     captionsWatchdog.start();
+    activeSpeaker.start();
     transcriptCapture.start();
     const meeting = await transcriptCapture.startMeeting();
     captureRunning = !!meeting;
@@ -72,6 +73,7 @@
     if (!captureRunning) return;
     captureRunning = false;
     captionsWatchdog.stop();
+    activeSpeaker.reset();
     transcriptCapture.stop();
     panelBridge.setCaptureRunning(false);
     panelBridge.setAudioActive(false);
@@ -94,6 +96,7 @@
       // Stop the persist timer before finalizing so a late snapshot cannot
       // re-create the record the worker is about to remove.
       captionsWatchdog.stop();
+      activeSpeaker.stop();
       transcriptCapture.stop();
       if (captureRunning) await transcriptCapture.endMeeting();
     } finally {
