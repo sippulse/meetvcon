@@ -19,8 +19,8 @@
       <section class="card" aria-labelledby="disclosure-title">
         <h2 id="disclosure-title">Before you enable capture</h2>
         <ul>
-          <li>Google caption text is captured as a fallback when you have captions on. The extension never turns captions on for you.</li>
-          <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to <strong>SipPulse AI</strong>, which returns the transcript; audio is not stored by the extension.</li>
+          <li>Google caption text is captured as a fallback when you have captions on. The extension turns captions on by itself only where your administrator made them the transcript source (see Settings).</li>
+          <li>Live transcription starts only when you click it. It streams the Meet tab audio and your microphone to <strong>SipPulse AI</strong>, which returns the transcript; audio is not stored by the extension. On the Google captions source no audio leaves this tab at all.</li>
           <li>The transcript is sent to <strong>SipPulse AI</strong> during and after the call to produce notes: summary, topics, action items, decisions, and open questions.</li>
           <li>Each transcribed line is sent to <strong>TypeSafe</strong> (Jev model) to classify its intent, sentiment, and whether it is an action item.</li>
           <li>The final vCon, including the meeting report, is stored in your organization's vCon store and emailed to <strong id="email">your company email</strong>.</li>

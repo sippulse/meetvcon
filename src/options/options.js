@@ -112,9 +112,12 @@ async function refresh() {
       ? "Enabled"
       : "Disabled by administrator"
     : "Waiting for your consent";
-  elements.provider.textContent = state.config.liveTranscriptionReady
-    ? `${transcription.PROFILE.label} (Google captions fallback)`
-    : "Google captions only (SipPulse AI URL and key not configured)";
+  elements.provider.textContent =
+    state.config.transcriptionSource === "google_captions"
+      ? "Google captions, turned on automatically (no audio leaves the tab)"
+      : state.config.liveTranscriptionReady
+      ? `${transcription.PROFILE.label} (Google captions fallback)`
+      : "Google captions only (SipPulse AI URL and key not configured)";
   const when = state.config.analysisMode === "live" ? "during the call" : "when the call ends";
   elements.notes.textContent = state.config.analysisReady
     ? `SipPulse AI, ${when}`
