@@ -13,7 +13,7 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 
-# Build output (none today, reserved)
+# Build output: the Chrome Web Store zip from `npm run package`
 dist/
 build/
 *.zip
@@ -34,6 +34,13 @@ chrome-profile/
 
 # Playwright profile created by tools/screenshot.js
 .playwright-profile/
+
+# Local Claude Code settings (permission allowlist, per developer)
+.claude/
+
+# Generated documents. The manuals are written in docs/*.md and the datasheet
+# is built from the template in the sippulse-website repo; the PDFs are output.
+docs/pdf/
 
 # Raw screenshot intermediates (only the composited 1280x800 PNGs are committed)
 screenshots/_raw/

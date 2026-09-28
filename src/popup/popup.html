@@ -1,35 +1,58 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>MeetVcon</title>
-  <link rel="stylesheet" href="popup.css" />
-</head>
-<body>
-  <header>
-    <h1>MeetVcon</h1>
-    <a href="#" id="openOptions" title="Open settings">Settings</a>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <title>SipPulse Meet Capture</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">SIPPULSE</p>
+          <h1>Meet Capture</h1>
+        </div>
+        <button id="settings" class="link">Settings</button>
+      </header>
 
-  <section id="webhookStatus" class="webhook-status hidden">
-    <span class="warn">No webhook URL configured.</span>
-    <a href="#" id="openOptionsInline">Open settings →</a>
-  </section>
+      <section class="status-card">
+        <span id="dot" class="dot"></span>
+        <div>
+          <strong id="status">Checking status…</strong>
+          <p id="detail"></p>
+        </div>
+      </section>
 
-  <section id="queueSection" class="section hidden">
-    <h2>Pending delivery <span id="queueCount" class="count">0</span></h2>
-    <ul id="queueList" class="list"></ul>
-  </section>
+      <button id="openPanel" class="primary hidden">Open the meeting panel</button>
+      <button id="setup" class="primary hidden">Review and enable capture</button>
+      <p id="panelHint" class="hint hidden">
+        The panel holds the live transcript, notes and speaker stats, and the
+        button that starts live transcription. No audio is stored.
+      </p>
+      <p id="message" class="message" aria-live="polite"></p>
 
-  <section class="section">
-    <h2>Recent meetings <span id="meetingsCount" class="count">0</span></h2>
-    <ul id="meetingsList" class="list"></ul>
-    <p id="meetingsEmpty" class="empty hidden">
-      No meetings captured yet. Open a Google Meet call with the extension active.
-    </p>
-  </section>
+      <section id="delivery" class="delivery">
+        <h2>Delivery</h2>
+        <p>CRM vCon storage <span>✓</span></p>
+        <p>Transcript email <span id="email">—</span></p>
+      </section>
 
-  <script src="../lib/vcon.js"></script>
-  <script src="popup.js"></script>
-</body>
+      <section id="outbox" class="outbox hidden">
+        <h2>Outbox</h2>
+        <div id="queue"></div>
+      </section>
+
+      <section id="lastTranscript" class="outbox hidden">
+        <h2>Last transcript (local copy)</h2>
+        <div class="queue-row">
+          <span id="lastTranscriptLabel"></span>
+          <button id="downloadMd">.md</button>
+          <button id="downloadVcon">.vcon</button>
+        </div>
+      </section>
+    </main>
+    <script src="../lib/logger.js"></script>
+    <script src="../lib/vcon.js"></script>
+    <script src="popup.js"></script>
+  </body>
 </html>

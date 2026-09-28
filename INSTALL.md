@@ -1,154 +1,195 @@
-# Installing MeetVcon
+# Internal Installation and Configuration
 
-Step-by-step guide for installing, updating, and troubleshooting MeetVcon
-as an unpacked Chromium extension. For a one-paragraph summary, see the
-[README](./README.md#install-developer-mode).
+## Where settings come from
 
-The extension is not yet on the Chrome Web Store. Until then, it runs in
-**developer mode** from a local clone of this repository.
+Each setting is read from two places, field by field:
 
-## Requirements
+1. **Google Admin (admin.google.com)** — preferred. Values pushed as extension
+   policy win and appear locked on the options page.
+2. **Local settings** — the **Settings** card on the extension's options page,
+   for anything the administrator did not set (a developer machine, or a pilot
+   before the policy exists). Values are stored encrypted on that computer;
+   keys are never displayed again, only their last four characters.
 
-- Chrome, Edge, Brave, or any Chromium-based browser, **version 120+**
-  (required by `manifest.json`).
-- Git (recommended, so you can `git pull` to update). Download-zip works
-  but skips the update path.
-- A reachable HTTPS webhook to receive vCon payloads. For local testing,
-  see [Webhook receiver: minimal example](./README.md#webhook-receiver-minimal-example).
+`CaptureEnabled` (kill switch) can only be set by policy.
 
-## Install
+| Field | Meaning |
+|---|---|
+**Required — three values:**
 
-1. **Clone the repo** somewhere stable on disk — *not* a tmp directory,
-   not a path that an IDE / sandbox may rewrite or delete. Chromium reads
-   files from this directory every time the extension runs.
+| Field | Meaning |
+|---|---|
+| `SipPulseAiApiKey` | SipPulse AI key. Covers live transcription and meeting notes |
+| `EndpointUrl` | HTTPS URL of the vCon store. SipPulse: `https://crm.sippulse.com/api/vcons/ingest` |
+| `HmacSecret` | The vCon store's shared secret (SipPulse CRM: `VCON_HMAC_SECRET`); every delivery is signed with it |
 
-   ```bash
-   git clone https://github.com/sippulse/meetvcon.git ~/code/meetvcon
-   ```
+**Optional:**
 
-2. Open the extensions page:
-   - Chrome: `chrome://extensions`
-   - Edge: `edge://extensions`
-   - Brave: `brave://extensions`
+| Field | Meaning |
+|---|---|
+| `SipPulseAiUrl` | HTTPS base of SipPulse AI. Defaults to `https://api.sippulse.ai` |
+| `AllowedEmailDomains` | Restrict which Chrome profiles may capture, e.g. `["sippulse.com"]`. Unset, any signed-in profile may |
+| `TranscriptionSource` | `sippulse_ai` (default) streams the call audio to SipPulse AI. `google_captions` reads Meet's own captions instead, and is the only mode that switches captions on; no audio leaves the tab, and the SipPulse AI key is used only for the report |
+| `AnalysisMode` | `final` (default) analyses once, when the call ends. `live` also analyses during the call: notes every minute and a tag per line, at a higher cost |
+| `TypeSafeUrl` + `TypeSafeApiKey` | Intent, sentiment and action-item classification with TypeSafe Jev, e.g. `https://api.typesafe.ai`. No default: classification is off unless set |
+| `CaptureEnabled` | `false` disables capture (policy only) |
 
-3. Toggle **Developer mode** (top right corner).
+The only endpoint built into the extension is SipPulse AI's public API, as
+the default for `SipPulseAiUrl`; the vCon store is always the
+organization's own. Without the three required values the extension stays
+off and says which one is missing.
 
-4. Click **Load unpacked** and select the directory you cloned into
-   (the folder that contains `manifest.json`, **not** `src/`).
+**Host access needs one click per collaborator, even with policy.** The
+manifest only asks for `meet.google.com`; every configured server is an
+*optional* host permission. Chrome grants those only from a user action, and
+extension policy cannot grant them, so Google Admin alone does not finish the
+setup. Saving settings asks for the hosts in the form; for URLs pushed by
+Google Admin, the options page shows **Allow access**, and the popup points
+there. Until someone clicks, live transcription and notes fail and finished
+meetings sit in the extension's outbox (they are delivered on the next retry
+after access is granted, nothing is lost). Tell the pilot group to open the
+options page once and choose **Allow access**.
 
-5. Pin the extension from the toolbar puzzle-piece menu so the icon is
-   always visible.
+### Google Admin (admin.google.com)
 
-6. Right-click the MeetVcon icon → **Options**. Paste your webhook URL,
-   choose a delivery mode, click **Save**. Then click **Send test payload**
-   to confirm the receiver gets a vCon.
+Policy reaches browsers managed by the organization (managed Chrome profiles
+or enrolled browsers), for the extension ID it is configured on.
 
-That's it. The next time you open a Google Meet, MeetVcon will start
-capturing captions automatically.
+1. Sign in to **admin.google.com** as an administrator.
+2. Go to **Devices › Chrome › Apps & extensions › Users & browsers**.
+3. Pick the organizational unit (start with a pilot OU).
+4. Add the extension with the **+** button: **Add from Chrome Web Store** for
+   the private listing, or **Add Chrome app or extension by ID** with the
+   extension's stable ID. Set the installation policy (Force install for the
+   pilot OU).
+5. Select the extension and paste the JSON below into **Policy for
+   extensions**, then **Save**. The Admin console requires every value wrapped
+   in `{"Value": ...}`:
 
-## Update
-
-Because the extension is loaded from disk, Chromium does not auto-update
-it. To pick up a new release:
-
-```bash
-cd ~/code/meetvcon
-git pull
+```json
+{
+  "SipPulseAiApiKey": { "Value": "SIPPULSE_AI_KEY" },
+  "EndpointUrl": { "Value": "https://crm.sippulse.com/api/vcons/ingest" },
+  "HmacSecret": { "Value": "CRM_VCON_HMAC_SECRET" }
+}
 ```
 
-Then go to `chrome://extensions` and click the **Reload** icon (⟳) on
-the MeetVcon row. Your saved configuration and meeting history persist
-across reloads.
+That is the whole SipPulse configuration. Add optional fields the same way,
+e.g. `"AllowedEmailDomains": { "Value": ["sippulse.com"] }` to restrict
+capture to company accounts, or `TypeSafeUrl`/`TypeSafeApiKey` for inline
+intent tags.
 
-If you cloned somewhere else, run `git pull` in that directory instead.
-The path that Chromium uses is shown under the extension name in
-`chrome://extensions` → **Details**.
+6. On a pilot machine, open `chrome://policy`, choose **Reload policies**, and
+   check the extension's entries; then open the extension's options page: the
+   fields show "set by Google Admin" and are locked. Choose **Allow access**
+   once so Chrome lets the extension reach the configured servers.
 
-## Uninstall
+Leave a field out of the JSON to let collaborators set it locally.
 
-`chrome://extensions` → **Remove** on the MeetVcon row. This deletes
-all stored config, the delivery queue, and the local meeting history.
+### Local settings
 
-To wipe local data without uninstalling, open the popup → click
-**Remove** on each meeting, or open the DevTools console on the popup
-and run:
+Open the extension's options page (**Settings** in the popup), fill the
+**Settings** card, and choose **Save settings**. Leave a key field empty to
+keep the stored key; **Remove local settings** clears everything saved on that
+computer. Then use **Test connections**.
 
-```js
-chrome.storage.local.clear()
+### Packaging for the Chrome Web Store
+
+`npm run package` writes `dist/meetvcon-<version>.zip` with the manifest, the
+policy schema, `icons/` and `src/`. Tests, tools, docs and store images stay
+out. Bump the version in both `package.json` and `manifest.json` first, or the
+script refuses to build: the store reads the manifest, and a mismatch publishes
+the wrong number. Upload that zip in the Web Store dashboard, then force-install
+the published ID through Google Admin.
+
+### Developer installation
+
+1. Run `npm install`, `npm test`, and `npm run check`.
+2. Open `chrome://extensions`, enable Developer mode, and choose **Load unpacked**.
+3. Select the repository root.
+4. Open the options page, accept the disclosure, and fill the **Settings**
+   card (an unpacked copy has its own extension ID, so Admin policy for the
+   published ID does not reach it).
+
+A local file policy also works for testing precedence
+(`/etc/opt/chrome/policies/managed/sippulse-meet.json` on Linux; plain values,
+no `"Value"` wrapper):
+
+```json
+{
+  "3rdparty": {
+    "extensions": {
+      "EXTENSION_ID": {
+        "SipPulseAiApiKey": "SIPPULSE_AI_KEY"
+      }
+    }
+  }
+}
 ```
 
-## Troubleshooting
+### Credentials
 
-### "File not found" when clicking the extension icon
+All credentials are pilot mechanisms and are readable by anyone with access
+to a configured machine, whether they came from policy or local settings:
 
-The extension is loaded from a path that no longer exists. This happens
-when you reload Chromium after moving / renaming / deleting the source
-directory.
+- Create a dedicated SipPulse AI key for Meet Capture with a spending
+  limit, and rotate it on a schedule.
+- If you enable classification, create a dedicated TypeSafe key.
+- The HMAC secret is shared by every enrolled machine and the CRM; anyone who
+  reads it can post vCons to the CRM. Rotate it on the CRM
+  (`VCON_HMAC_SECRET`) and in policy together, and replace it with SipPulse
+  SSO before broad deployment.
 
-**Fix:**
+Before touching a real Meet, `npm run e2e:live` checks both keys and the
+whole pipeline with a synthetic meeting (see `docs/INTERNAL_INGESTION.md`).
 
-1. `chrome://extensions` → **Remove** on the MeetVcon row.
-2. Click **Load unpacked** again and select the current location of
-   the cloned repo.
+### Microphone permission
 
-To confirm where Chromium is reading from: `chrome://extensions` →
-**Details** → **Source**.
+The background recorder cannot show Chrome's microphone prompt. The first time
+a collaborator starts live transcription, the popup opens
+`src/permissions/microphone.html` in a tab to request the grant once; after
+that the recorder reuses it. Administrators can pre-grant it and skip the tab
+with the Chrome policy `AudioCaptureAllowedUrls` containing
+`chrome-extension://EXTENSION_ID/` (verify this against your Chrome version in
+the pilot before relying on it).
 
-### "Errors" red badge on the extension row
+## Company deployment
 
-Open `chrome://extensions` and click the red **Errors** button next to
-MeetVcon. The most common causes:
+Publish privately for the SipPulse Workspace domain, deploy first to a pilot
+organizational unit, and configure the policy declared by
+`enterprise-policy.json`. The production package must use a stable extension ID.
+Force installation only after consent, capture, fallback, CRM, email, and
+discard behavior have passed the pilot checklist.
 
-- A file referenced by `manifest.json` was deleted or renamed locally.
-  Run `git status` in the repo and discard any unintended local changes,
-  then **Reload** the extension.
-- A syntax error after editing a JS file. The error message includes
-  the filename and line.
+## Manual verification
 
-### Webhook returns HTTP 404 (visible next to each meeting)
-
-The extension is fine — your webhook endpoint is returning 404. Confirm
-with curl:
-
-```bash
-curl -i -X POST \
-  -H 'Content-Type: application/vcon+json' \
-  -d '{"test":true}' \
-  '<YOUR_WEBHOOK_URL>'
-```
-
-Common causes: missing path segment (e.g. `/webhook`), typo in path,
-endpoint deactivated, or a temporary URL (webhook.site, ngrok free)
-that expired.
-
-Once you fix the URL in Options, click **Resend** on each affected
-meeting in the popup to re-deliver, or **Remove** to drop them.
-
-### Captions aren't being captured in Meet
-
-Look at the in-call panel (bottom-right corner of the Meet tab). If it
-shows the watchdog is enabled but no utterances appear, Meet may have
-shipped a DOM change. Open an issue with your Chromium version, Meet
-language, and an excerpt from the DevTools console filtered for
-`[MeetVcon]`.
-
-The first place a maintainer will look is `src/lib/selectors.js`.
-
-### Permission denied for the webhook host
-
-The extension requests host permission for the webhook origin the first
-time you save. If you denied it, reopen Options and click **Save** again
-to re-prompt. The permission is scoped to that specific origin —
-`https://your.host/*`.
-
-## Security notes
-
-- Webhook URL, bearer token, and HMAC secret are stored in
-  `chrome.storage.local` on your machine only. They are never transmitted
-  anywhere except as part of the configured webhook request.
-- The vCon payload includes any speaker name Meet exposes. Speaker emails
-  are off by default (toggleable in Options). The capturer's Chrome
-  profile email is on by default (toggleable).
-- For HMAC-signed delivery, the receiver should verify
-  `X-MeetVcon-Signature: sha256=<hex>` against the raw request body
-  before parsing.
+1. Open the options page, check that each field shows where it comes from
+   ("set by Google Admin" or "saved on this computer"), and choose **Test
+   connections**; the vCon store, transcription, and SipPulse AI must report
+   OK (TypeSafe too, if configured).
+2. Confirm capture stays off before consent, and for a profile outside
+   `AllowedEmailDomains` when that is set. Upgrading from 0.2 must ask for
+   consent again.
+3. Join Meet, click the extension and choose **Open the meeting panel**;
+   verify the side panel shows Google captions in the Transcript tab.
+4. In the side panel choose **Start live transcription**. On first use a tab
+   asks for microphone access; allow it, return to Meet, and start again.
+5. Confirm remote audio remains audible, the panel shows "Live transcription
+   on", your lines appear under your name, and remote lines under their Meet
+   names within about two seconds. Within another second, lines get tags
+   such as "question" or "commitment".
+6. With `AnalysisMode: "live"`, after about a minute of conversation the Notes tab shows a summary and
+   action items; the Speakers tab shows talk time and sentiment.
+7. Toggle Wi-Fi off for ~20 seconds and back on; the panel reports
+   reconnecting and the transcript resumes with correct timestamps.
+8. End the call; the popup shows "Preparing the meeting report" and then
+   "Delivered". Verify CRM stores one vCon with `analysis[]` and the
+   collaborator receives one email. **Last transcript → .md** contains the
+   report and transcript.
+9. Repeat with a failed endpoint, then restore it and retry from the outbox.
+   Confirm **Download** on the outbox row and "Last transcript" in the popup
+   produce a readable `.md`.
+10. Start another call, choose **Stop and discard**, reload the Meet tab, and
+   verify the panel stays in the discarded state and nothing is delivered.
+11. Join a call where nobody speaks and leave; confirm the popup does not stay
+   on "Google captions active".

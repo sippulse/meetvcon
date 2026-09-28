@@ -1,9 +1,9 @@
-// Generate Chrome Web Store screenshots for the MeetVcon listing.
+// Generate private Chrome Web Store screenshots for SipPulse Meet Capture.
 //
 // Captures three views and composites each onto a 1280x800 canvas:
-//   1. Options page (configured with sample webhook URL)
-//   2. Popup (with seeded recent meetings + queued retry)
-//   3. Static in-call panel preview (no real Meet call needed)
+//   1. Consent and managed-configuration page
+//   2. Status-focused popup
+//   3. The real side panel beside a mock Meet call (no real call needed)
 //
 // Output: ./screenshots/options.png, popup.png, in-call.png
 //
@@ -12,7 +12,6 @@
 const { chromium } = require("playwright");
 const path = require("node:path");
 const fs = require("node:fs");
-const { execSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const EXT_DIR = ROOT;
@@ -49,17 +48,23 @@ async function main() {
   const extensionId = serviceWorker.url().split("/")[2];
   console.log("extension id:", extensionId);
 
+  serviceWorker.on("console", (message) => {
+    if (message.type() === "error") {
+      console.error("service worker:", message.text());
+    }
+  });
+
   await seedStorage(context, extensionId);
 
   await captureOptions(context, extensionId);
   await capturePopup(context, extensionId);
   await capturePanel(context);
 
-  await context.close();
+  await composite(context, "options.raw.png", "options.png");
+  await composite(context, "popup.raw.png", "popup.png");
+  await composite(context, "in-call.raw.png", "in-call.png");
 
-  composite("options.raw.png", "options.png");
-  composite("popup.raw.png", "popup.png");
-  composite("in-call.raw.png", "in-call.png");
+  await context.close();
 
   console.log("\nDone. Screenshots written to", OUT_DIR);
 }
@@ -69,61 +74,19 @@ async function seedStorage(context, extensionId) {
   await page.goto(`chrome-extension://${extensionId}/src/options/options.html`);
 
   await page.evaluate(() => {
-    const now = Date.now();
-    const iso = (offsetMin) => new Date(now - offsetMin * 60_000).toISOString();
     return chrome.storage.local.set({
-      config: {
-        webhookUrl: "https://api.example.com/v1/meetvcon/webhook",
-        bearerToken: "********",
-        hmacSecret: "",
-        deliveryMode: "periodic_snapshot",
-        snapshotIntervalMin: 5,
-        includeSpeakerEmail: false,
-        includeCapturerEmail: true,
+      storageSchemaVersion: 2,
+      consent: {
+        accepted: true,
+        acceptedAt: new Date().toISOString(),
+        version: 2,
       },
-      meetings: [
-        {
-          uuid: "018f3a1c-2b4d-7e0a-9c11-aa11bb22cc33",
-          meetingId: "abc-defg-hij",
-          subject: "Acme weekly sync",
-          startedAt: iso(35),
-          endedAt: iso(2),
-          utteranceCount: 142,
-          status: "delivered",
-        },
-        {
-          uuid: "018f3a1c-2b4d-7e0a-9c11-aa11bb22cc34",
-          meetingId: "klm-nopq-rst",
-          subject: "1:1 with Bob",
-          startedAt: iso(125),
-          endedAt: iso(95),
-          utteranceCount: 88,
-          status: "delivered",
-        },
-        {
-          uuid: "018f3a1c-2b4d-7e0a-9c11-aa11bb22cc35",
-          meetingId: "uvw-xyza-bcd",
-          subject: "Standup",
-          startedAt: iso(360),
-          endedAt: iso(345),
-          utteranceCount: 0,
-          status: "skipped_no_captions",
-        },
-      ],
-      queue: [
-        {
-          id: "queue-1",
-          vcon: {
-            uuid: "018f3a1c-2b4d-7e0a-9c11-aa11bb22cc36",
-            subject: "Customer call",
-          },
-          url: "https://api.example.com/v1/meetvcon/webhook",
-          deliveryKind: "final",
-          attempts: 2,
-          nextAttemptAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-          lastError: "HTTP 500",
-        },
-      ],
+      deliveryStatus: {
+        state: "capturing",
+        source: "sippulse_ai_live",
+        updatedAt: new Date().toISOString(),
+      },
+      queue: [],
     });
   });
   await page.close();
@@ -131,12 +94,16 @@ async function seedStorage(context, extensionId) {
 
 async function captureOptions(context, extensionId) {
   const page = await context.newPage();
+  reportPageErrors(page, "options");
   await page.goto(
     `chrome-extension://${extensionId}/src/options/options.html`,
     { waitUntil: "load" }
   );
   await page.bringToFront();
-  await page.waitForTimeout(1000);
+  await page.waitForFunction(
+    () => document.getElementById("configuration")?.textContent !== "Checking…",
+    { timeout: 5000 }
+  );
   await page.screenshot({
     path: path.join(RAW_DIR, "options.raw.png"),
     fullPage: false,
@@ -146,13 +113,17 @@ async function captureOptions(context, extensionId) {
 
 async function capturePopup(context, extensionId) {
   const page = await context.newPage();
+  reportPageErrors(page, "popup");
   await page.setViewportSize({ width: 360, height: 600 });
   await page.goto(
     `chrome-extension://${extensionId}/src/popup/popup.html`,
     { waitUntil: "load" }
   );
   await page.bringToFront();
-  await page.waitForTimeout(1000);
+  await page.waitForFunction(
+    () => document.getElementById("status")?.textContent !== "Checking status…",
+    { timeout: 5000 }
+  );
   await page.screenshot({
     path: path.join(RAW_DIR, "popup.raw.png"),
     fullPage: true,
@@ -160,9 +131,66 @@ async function capturePopup(context, extensionId) {
   await page.close();
 }
 
+// One meeting, as the Meet page would have pushed it to the panel.
+const SNAPSHOT = {
+  status: "active",
+  audioActive: true,
+  analysisEnabled: true,
+  classificationEnabled: true,
+  liveAnalysis: false,
+  collaborator: { email: "ana.souza@sippulse.com" },
+  meetingId: "abc-defg-hij",
+  meetingStartedAt: new Date(Date.now() - 14 * 60_000).toISOString(),
+  utterances: [
+    ["Jane Doe", "Obrigado por entrarem. Vamos começar pela revisão do pipeline de vendas.", 12, 5.5],
+    ["Ana Souza", "Fechamos três provedores novos em agosto, e a Vivanet pediu proposta para 20 mil assinantes.", 18.2, 7.7],
+    ["Jane Doe", "Qual é o prazo que eles deram para a proposta?", 26.5, 2.5],
+    ["Ana Souza", "Até sexta-feira. Eu envio a proposta e o Bruno cuida da parte técnica do SBC.", 29.6, 5.5],
+    ["Jane Doe", "Só acho que o desconto que eles pediram está alto demais.", 35.8, 4.6],
+  ].map(([speaker, text, start, duration], index) => ({
+    segment_id: index + 1,
+    speaker,
+    text,
+    start: new Date(Date.now() - 14 * 60_000 + start * 1000).toISOString(),
+    duration,
+  })),
+  classifications: {
+    2: { intent: "purchase_interest", intent_confidence: 0.82, sentiment: 0.55, action_item: 0.1 },
+    3: { intent: "question", intent_confidence: 1, sentiment: 0, action_item: 0.04 },
+    4: { intent: "commitment", intent_confidence: 0.98, sentiment: 0.1, action_item: 0.97 },
+    5: { intent: "objection", intent_confidence: 0.9, sentiment: -0.45, action_item: 0.02 },
+  },
+  interim: {},
+  analysis: null,
+  analysisAt: null,
+  analysisError: "",
+  transcriptionState: "",
+};
+
 async function capturePanel(context) {
   const page = await context.newPage();
   await page.setViewportSize({ width: TARGET_W, height: TARGET_H });
+  // Applies to the iframe too, before its scripts run: the panel renders the
+  // shipped code against this one snapshot.
+  await page.addInitScript((snapshot) => {
+    window.chrome = {
+      runtime: {
+        lastError: null,
+        getURL: (file) => file,
+        openOptionsPage() {},
+        sendMessage: async () => ({ ok: true }),
+      },
+      tabs: {
+        query: async () => [{ id: 1, url: "https://meet.google.com/abc-defg-hij" }],
+        create: async () => {},
+        connect: () => ({
+          onMessage: { addListener: (fn) => fn({ type: "panel_state", snapshot }) },
+          onDisconnect: { addListener: () => {} },
+          postMessage: () => {},
+        }),
+      },
+    };
+  }, SNAPSHOT);
   const fileUrl = "file://" + path.join(ROOT, "tools", "panel-preview.html");
   await page.goto(fileUrl, { waitUntil: "load" });
   await page.bringToFront();
@@ -174,15 +202,18 @@ async function capturePanel(context) {
   await page.close();
 }
 
-// Composite a raw capture onto a 1280x800 canvas with a clean background.
-// ImageMagick `convert` is invoked from the shell; available in our WSL env.
-function composite(rawName, outName) {
+function reportPageErrors(page, label) {
+  page.on("pageerror", (error) => console.error(`${label}:`, error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error(`${label}:`, message.text());
+  });
+}
+
+// Composite with Chromium itself so this tool has no system ImageMagick
+// dependency beyond the Playwright dependency already used for capture.
+async function composite(context, rawName, outName) {
   const raw = path.join(RAW_DIR, rawName);
   const out = path.join(OUT_DIR, outName);
-  const bg =
-    rawName === "in-call.raw.png"
-      ? "none" // keep the panel preview as-is
-      : "white";
 
   if (rawName === "in-call.raw.png") {
     // Already 1280x800 from the panel-preview viewport.
@@ -190,26 +221,20 @@ function composite(rawName, outName) {
     return;
   }
 
-  // Get raw dimensions so we can downscale if larger than canvas.
-  const dims = execSync(`identify -format "%wx%h" "${raw}"`).toString().trim();
-  const [w, h] = dims.split("x").map(Number);
-
-  // Scale down if the raw is bigger than the target canvas.
-  const scaleW = w > TARGET_W ? TARGET_W : w;
-  const scaleH = h > TARGET_H ? TARGET_H : h;
-  const tmp = path.join(RAW_DIR, "_scaled_" + rawName);
-  execSync(
-    `convert "${raw}" -resize ${scaleW}x${scaleH}\\> "${tmp}"`,
-    { stdio: "inherit" }
-  );
-
-  // Place onto centered 1280x800 canvas.
-  execSync(
-    `convert -size ${TARGET_W}x${TARGET_H} canvas:${bg} ` +
-      `"${tmp}" -gravity center -composite "${out}"`,
-    { stdio: "inherit" }
-  );
-  fs.unlinkSync(tmp);
+  const dataUrl = `data:image/png;base64,${fs.readFileSync(raw).toString("base64")}`;
+  const page = await context.newPage();
+  await page.setViewportSize({ width: TARGET_W, height: TARGET_H });
+  await page.setContent(`
+    <!doctype html>
+    <style>
+      html, body { width: 100%; height: 100%; margin: 0; }
+      body { display: flex; align-items: center; justify-content: center; background: white; }
+      img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+    </style>
+    <img alt="" src="${dataUrl}">
+  `);
+  await page.screenshot({ path: out, fullPage: false });
+  await page.close();
 }
 
 main().catch((err) => {

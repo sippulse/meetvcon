@@ -1,30 +1,25 @@
-// Captions watchdog: ensures Google Meet captions are enabled while in a call.
-//
-// Strategy (PRD §6.1.1):
-//   1. Click the captions toggle button (aria-label match).
-//   2. Fallback: dispatch keyboard "c" event (Meet's built-in shortcut).
-//   3. Watchdog: re-check every 10s while in call; re-enable if turned off.
-//   4. Rate limit: max 3 enable attempts per minute (don't fight a user
-//      who deliberately disables captions).
-//   5. Hard opt-out: if the user clicks "Disable for this call" in the
-//      MeetVcon panel, watchdog stops.
+// Watches whether Google Meet captions are on, and turns them on only when
+// they are the configured transcript source (TranscriptionSource:
+// google_captions). On SipPulse AI it never touches the toggle: forcing CC
+// changed what everyone in the call saw on screen for a fallback the
+// collaborator may not want. Their labels name remote speakers either way.
 
 (function () {
   const ns = (window.MeetVcon = window.MeetVcon || {});
   if (ns.captionsWatchdog) return;
 
   const { log, selectors } = ns;
-
-  const WATCHDOG_INTERVAL_MS = 10_000;
+  const INTERVAL_MS = 5_000;
+  // Don't fight a user who keeps switching captions off.
   const RATE_WINDOW_MS = 60_000;
   const RATE_MAX_ATTEMPTS = 3;
 
   const state = {
     intervalId: null,
-    attemptTimestamps: [], // ms epochs of recent enable attempts
-    optedOut: false,
-    listeners: new Set(), // (status) => void
     lastStatus: null,
+    listeners: new Set(),
+    enable: false,
+    attempts: [],
   };
 
   function notify(status) {
@@ -41,109 +36,51 @@
 
   function rateLimited() {
     const now = Date.now();
-    state.attemptTimestamps = state.attemptTimestamps.filter(
-      (t) => now - t < RATE_WINDOW_MS
-    );
-    return state.attemptTimestamps.length >= RATE_MAX_ATTEMPTS;
+    state.attempts = state.attempts.filter((at) => now - at < RATE_WINDOW_MS);
+    return state.attempts.length >= RATE_MAX_ATTEMPTS;
   }
 
-  function recordAttempt() {
-    state.attemptTimestamps.push(Date.now());
+  function pressKey() {
+    const init = { key: "c", code: "KeyC", keyCode: 67, which: 67, bubbles: true, cancelable: true };
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      document.body.dispatchEvent(new KeyboardEvent(type, init));
+    }
   }
 
-  // Strategy 1: aria-label click.
-  function tryClickToggle() {
-    const btn = selectors.findCaptionsToggleButton();
-    if (!btn) {
-      log.debug("captions toggle button not found");
-      return false;
-    }
-    log.debug("clicking captions toggle", btn.getAttribute("aria-label"));
-    btn.click();
-    return true;
-  }
-
-  // Strategy 2: keyboard "c" shortcut.
-  function tryKeyboardShortcut() {
-    log.debug("dispatching 'c' keydown to toggle captions");
-    const init = {
-      key: "c",
-      code: "KeyC",
-      keyCode: 67,
-      which: 67,
-      bubbles: true,
-      cancelable: true,
-    };
-    document.body.dispatchEvent(new KeyboardEvent("keydown", init));
-    document.body.dispatchEvent(new KeyboardEvent("keypress", init));
-    document.body.dispatchEvent(new KeyboardEvent("keyup", init));
-    return true;
-  }
-
-  function attemptEnable(reason) {
-    if (state.optedOut) {
-      log.debug("skip enable: user opted out");
-      return false;
-    }
-    if (rateLimited()) {
-      log.warn("skip enable: rate-limited (3 attempts/min)");
-      return false;
-    }
-    log.info("attempting to enable captions:", reason);
-    recordAttempt();
-
-    if (tryClickToggle()) {
-      // Verify after a short delay that it took effect.
-      setTimeout(() => {
-        if (!selectors.areCaptionsActive()) {
-          log.warn("toggle click did not enable captions, trying keyboard");
-          tryKeyboardShortcut();
-        }
-      }, 500);
-      return true;
-    }
-    return tryKeyboardShortcut();
+  function attemptEnable() {
+    if (rateLimited()) return;
+    state.attempts.push(Date.now());
+    const button = selectors.findCaptionsToggleButton();
+    if (!button) return pressKey();
+    log.info("turning captions on: they are the configured transcript source");
+    button.click();
+    // The button is not always the real toggle; check and fall back.
+    setTimeout(() => {
+      if (!selectors.areCaptionsActive()) pressKey();
+    }, 500);
   }
 
   function tick() {
-    if (!selectors.isInCall()) {
-      // Out of call — emit "idle" status and skip.
-      notify("idle");
-      return;
-    }
-    if (selectors.areCaptionsActive()) {
-      notify("active");
-      return;
-    }
-    notify("enabling");
-    attemptEnable("watchdog detected captions off");
+    if (!selectors.isInCall()) return notify("idle");
+    if (selectors.areCaptionsActive()) return notify("active");
+    notify("off");
+    if (state.enable) attemptEnable();
   }
 
-  function start() {
+  // enable: captions are the transcript source, so switch them on.
+  function start({ enable = false } = {}) {
+    state.enable = !!enable;
     if (state.intervalId) return;
-    log.info("captions watchdog started");
-    // Run a tick immediately, then on interval.
+    state.attempts = [];
     tick();
-    state.intervalId = setInterval(tick, WATCHDOG_INTERVAL_MS);
+    state.intervalId = setInterval(tick, INTERVAL_MS);
   }
 
   function stop() {
     if (!state.intervalId) return;
     clearInterval(state.intervalId);
     state.intervalId = null;
-    log.info("captions watchdog stopped");
     notify("idle");
-  }
-
-  function optOut() {
-    state.optedOut = true;
-    notify("opted_out");
-    log.info("user opted out of caption auto-enable for this call");
-  }
-
-  function clearOptOut() {
-    state.optedOut = false;
-    log.info("opt-out cleared");
   }
 
   function onStatusChange(fn) {
@@ -152,20 +89,5 @@
     return () => state.listeners.delete(fn);
   }
 
-  // Manual one-shot, e.g. from a "Try again" button.
-  function forceEnable() {
-    state.attemptTimestamps = []; // reset rate limit on user request
-    state.optedOut = false;
-    return attemptEnable("manual user request");
-  }
-
-  ns.captionsWatchdog = {
-    start,
-    stop,
-    optOut,
-    clearOptOut,
-    forceEnable,
-    onStatusChange,
-    getStatus: () => state.lastStatus,
-  };
+  ns.captionsWatchdog = { start, stop, onStatusChange, getStatus: () => state.lastStatus };
 })();

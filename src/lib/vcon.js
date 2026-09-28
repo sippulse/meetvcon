@@ -58,7 +58,8 @@
   // Assemble a vCon from a meeting record.
   // record: { uuid, meetingId, meetingUrl, subject, startedAt,
   //           utterances, captionsEnabled }
-  // opts:   { capturedBy, deliveryKind, capturedByUser }
+  // opts:   { capturedBy, deliveryKind, transcriptionSource, transcription,
+  //           analysis (vCon analysis[] entries), analysisError, capturedByUser }
   //   capturedByUser: { email, id } | null — the Chrome profile that ran
   //   the extension. Surfaces in attachments[].body.captured_by_user when
   //   present.
@@ -71,10 +72,17 @@
       platform: "google_meet",
       meeting_code: record.meetingId,
       meeting_url: record.meetingUrl,
-      captured_by: opts.capturedBy || "MeetVcon",
+      captured_by: opts.capturedBy || "SipPulse Meet Capture",
       captions_enabled: record.captionsEnabled !== false,
       delivery_kind: opts.deliveryKind || "final",
+      transcription_source: opts.transcriptionSource || "google_captions",
     };
+    if (opts.transcription) {
+      metadata.transcription = opts.transcription;
+    }
+    if (opts.analysisError) {
+      metadata.analysis_error = opts.analysisError;
+    }
     if (opts.capturedByUser && opts.capturedByUser.email) {
       metadata.captured_by_user = {
         email: opts.capturedByUser.email,
@@ -91,7 +99,7 @@
       subject: record.subject || "",
       parties,
       dialog,
-      analysis: [],
+      analysis: Array.isArray(opts.analysis) ? opts.analysis : [],
       attachments: [
         {
           type: "meeting_metadata",
@@ -100,6 +108,84 @@
         },
       ],
     };
+  }
+
+  function findAnalysis(doc, type) {
+    return (Array.isArray(doc.analysis) ? doc.analysis : []).find((entry) => entry.type === type);
+  }
+
+  function formatSeconds(value) {
+    const total = Math.round(Number(value) || 0);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+  }
+
+  // Meeting report sections (summary, action items, ...) from the
+  // meeting_insights and speaker_analytics analysis entries.
+  function reportSections(doc) {
+    const insights = findAnalysis(doc, "meeting_insights")?.body;
+    const stats = findAnalysis(doc, "speaker_analytics")?.body;
+    const lines = [];
+    const section = (title, items) => {
+      if (!items.length) return;
+      lines.push(`## ${title}`, "", ...items, "");
+    };
+    if (insights) {
+      if (insights.headline) lines.push(`> ${insights.headline}`, "");
+      if (insights.summary) lines.push("## Summary", "", insights.summary, "");
+      section("Key points", (insights.key_points || []).map((point) => `- ${point}`));
+      section(
+        "Action items",
+        (insights.action_items || []).map(
+          (item) =>
+            `- [ ] ${item.task}${item.owner ? ` — **${item.owner}**` : ""}${item.due ? ` (${item.due})` : ""}`
+        )
+      );
+      if (insights.next_step) lines.push("## Next step", "", insights.next_step, "");
+      section(
+        "Decisions",
+        // Decisions used to be plain strings.
+        (insights.decisions || []).map((decision) =>
+          typeof decision === "string"
+            ? `- ${decision}`
+            : `- ${decision.decision}${decision.rationale ? ` — ${decision.rationale}` : ""}`
+        )
+      );
+      section(
+        "Figures",
+        (insights.numbers || []).map(
+          (number) => `- **${number.label}:** ${number.value}${number.context ? ` — ${number.context}` : ""}`
+        )
+      );
+      section("Risks and objections", (insights.risks || []).map((risk) => `- ${risk}`));
+      section(
+        "Topics",
+        (insights.topics || []).map(
+          (topic) => `- ${topic.start ? `\`${topic.start}\` ` : ""}**${topic.title}** — ${topic.summary}`
+        )
+      );
+      section(
+        "Intents",
+        (insights.intents || []).map(
+          (intent) =>
+            `- ${intent.at ? `\`${intent.at}\` ` : ""}**${intent.speaker || "?"}** · ${intent.intent}: ${intent.detail}`
+        )
+      );
+      section("Open questions", (insights.open_questions || []).map((question) => `- ${question}`));
+    }
+    if (Array.isArray(stats) && stats.length) {
+      const sentiment = new Map((insights?.sentiment || []).map((entry) => [entry.speaker, entry]));
+      lines.push("## Speakers", "", "| Speaker | Talk time | Share | Turns | Sentiment |", "|---|---|---|---|---|");
+      for (const entry of stats) {
+        const mood = sentiment.get(entry.speaker);
+        lines.push(
+          `| ${entry.speaker} | ${formatSeconds(entry.talk_seconds)} | ${Math.round(entry.talk_share * 100)}% | ${entry.turns} | ${mood ? mood.label : ""} |`
+        );
+      }
+      lines.push("");
+    }
+    return lines;
   }
 
   // Render a vCon document as a human-friendly Markdown transcript.
@@ -142,12 +228,17 @@
       facts.push(`- **Capturer:** ${meta.captured_by_user.email}`);
     }
     if (meta.delivery_kind) facts.push(`- **Delivery:** ${meta.delivery_kind}`);
+    if (meta.transcription_source) {
+      facts.push(`- **Transcription:** ${meta.transcription_source}`);
+    }
     if (doc.uuid) facts.push(`- **vCon UUID:** ${doc.uuid}`);
     if (facts.length) {
       lines.push("## Details");
       lines.push("");
       lines.push(...facts, "");
     }
+
+    lines.push(...reportSections(doc));
 
     lines.push("## Transcript");
     lines.push("");

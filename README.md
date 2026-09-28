@@ -1,215 +1,115 @@
-# MeetVcon
+# SipPulse Meet Capture
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![vCon](https://img.shields.io/badge/format-vCon-1f6feb.svg)](https://datatracker.ietf.org/wg/vcon/about/)
+Internal Chrome extension for live Google Meet transcription and meeting
+intelligence. While the call runs, Chrome's side panel shows a live,
+speaker-labelled transcript, AI notes (summary, action items, topics,
+intents), and talk time with sentiment per speaker. When the call ends, one vCon
+with the transcript and meeting report is stored in SipPulse CRM and emailed
+to the capturing collaborator (`@sippulse.com` by default; the
+`AllowedEmailDomains` policy can change it for other organizations).
 
-Chrome extension that transcribes Google Meet calls using the browser's
-built-in captions and POSTs each transcript as an IETF
-[**vCon**](https://datatracker.ietf.org/wg/vcon/about/) (Virtualized
-Conversation) JSON document to a user-configured HTTPS webhook.
+## How it works
 
-- **No external speech-to-text.** No Whisper, no Deepgram, no Google STT
-  API. Transcription quality is whatever Meet's browser captions provide.
-- **No bot joins your call.** A floating panel reads captions from the DOM.
-- **No third-party servers.** The transcript leaves your device only when
-  it's POSTed to the webhook *you* configure.
-- **Standard format.** Receivers consume `application/vcon+json`, the
-  emerging standard for interoperable conversation data.
+- **Live transcription (SipPulse AI by default):** the collaborator clicks
+  the extension action once during the meeting. The offscreen recorder
+  streams the collaborator's microphone and the Meet tab as two mono streams
+  over the `/v1/listen` protocol to the SipPulse AI gateway
+  (`pulse-stt-streaming-v1`, pt-BR). Remote voices are named from Google Meet
+  caption labels. No audio is stored.
+- **Inline classification (TypeSafe Jev, optional):** each final line is classified in
+  about 300 ms — intent (commitment, decision, question, objection, buying
+  signal, problem, scheduling), sentiment, and action item — and tagged in
+  the live transcript.
+- **Meeting notes (SipPulse AI):** about every minute the transcript so far is
+  sent to SipPulse AI (`deepseek-v4.1-flash`, OpenAI-compatible API) for live
+  notes; after the call the full transcript produces the final report,
+  stored in the vCon's `analysis[]` with the Jev intents and sentiment.
+- **Google captions (fallback):** when the collaborator has captions on, their
+  text is read into an encrypted local recovery record. It names remote
+  speakers and becomes the final transcript if live transcription was not
+  started or failed. The extension never switches captions on by itself.
 
-See [`PRD.md`](./PRD.md) for the full product specification.
+Audio capture cannot start silently: Chrome requires an explicit extension
+action for `tabCapture`. The side panel shows the capture state and can stop and
+discard the current call. Open it from the extension popup, or from Chrome's
+side panel menu.
 
-## Features
+## Development
 
-- **Captions auto-enable.** On joining a call, MeetVcon turns Meet's
-  captions on for you and re-enables them within ~10 seconds if they get
-  turned off mid-call (rate-limited; respects an explicit user opt-out).
-- **Two delivery modes.**
-  - `end_of_call` (default): one POST per call, on hangup.
-  - `periodic_snapshot`: every N minutes (1–60), POST a cumulative
-    snapshot using the same vCon UUID. Survives tab crashes; supports
-    near-real-time receivers.
-- **Reliable delivery.** Exponential-backoff retry queue (30s → 24h),
-  persisted across service-worker restarts. Snapshot dedup so stale
-  retries don't clobber fresh data.
-- **Authenticated webhooks.** Optional Bearer token and optional
-  HMAC-SHA256 body signature.
-- **Capturer attribution.** Each vCon includes the Chrome profile email
-  of the user who ran the extension (toggleable).
-- **In-call status panel** with capture indicator and one-click
-  opt-out / try-again.
-- **Popup UI.** Pending-delivery queue (Retry / Download vCon / Discard)
-  and recent-meetings list.
-
-## Install (developer mode)
-
-The extension is not yet published on the Chrome Web Store. To run it:
-
-1. Clone this repo (or download the source zip):
-   ```bash
-   git clone https://github.com/sippulse/meetvcon.git
-   ```
-2. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
-3. Toggle **Developer mode** in the top right.
-4. Click **Load unpacked** and select the cloned `meetvcon/` directory.
-5. Pin the extension from the toolbar puzzle-piece menu.
-
-For detailed steps, how to update (`git pull` + reload), uninstall, and
-troubleshooting, see [**INSTALL.md**](./INSTALL.md).
-
-## Configure
-
-Right-click the MeetVcon icon → **Options**.
-
-| Field | Required | Description |
-| --- | --- | --- |
-| Webhook URL | yes | HTTPS endpoint that receives the vCon payloads. |
-| Bearer token | no | Sent as `Authorization: Bearer <token>` if set. |
-| HMAC signing secret | no | If set, payloads are signed: `X-MeetVcon-Signature: sha256=<hex>` (HMAC-SHA256 over the raw body). |
-| Delivery mode | yes | `end_of_call` (default) or `periodic_snapshot`. |
-| Snapshot interval | conditional | Minutes between snapshots, when in `periodic_snapshot` mode (1–60, default 5). |
-| Include capturer email | no | When on (default), the Chrome profile email is included in `attachments[0].body.captured_by_user.email`. |
-
-Click **Send test payload** to verify your receiver gets a vCon before
-joining a real call.
-
-## vCon payload shape
-
-Conforms to `draft-ietf-vcon-vcon-container`. Minimum example:
-
-```json
-{
-  "vcon": "0.0.1",
-  "uuid": "018f3a1c-...",
-  "created_at": "2026-04-30T14:32:11Z",
-  "subject": "Weekly sync",
-  "parties": [
-    { "name": "Flavio Costa" },
-    { "name": "Jane Doe" }
-  ],
-  "dialog": [
-    { "type": "text", "start": "2026-04-30T14:32:15Z",
-      "duration": 4.2, "parties": [0],
-      "body": "Thanks everyone for joining." }
-  ],
-  "analysis": [],
-  "attachments": [
-    {
-      "type": "meeting_metadata",
-      "encoding": "json",
-      "body": {
-        "platform": "google_meet",
-        "meeting_code": "abc-defg-hij",
-        "meeting_url": "https://meet.google.com/abc-defg-hij",
-        "captured_by": "MeetVcon/0.1.0",
-        "captions_enabled": true,
-        "delivery_kind": "final",
-        "captured_by_user": {
-          "email": "you@example.com",
-          "id": "1234567890abcdef"
-        }
-      }
-    }
-  ]
-}
+```bash
+npm install
+npm test
+npm run check
+npm run e2e:live   # real SipPulse AI dev + TypeSafe; needs keys in .env
 ```
 
-## Webhook receiver: minimal example
+Load the repository root from `chrome://extensions` using **Load unpacked**.
+The extension fails closed until a vCon storage endpoint and token are
+configured and the collaborator accepts the disclosure. Settings come from
+Google Admin (admin.google.com, preferred) or the options page's local
+settings; see [INSTALL.md](./INSTALL.md).
 
-Any HTTPS endpoint will work. A throwaway Node.js receiver for testing:
+## Structure
 
-```js
-import http from "node:http";
-http
-  .createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", () => {
-      console.log(req.method, req.url, req.headers["x-meetvcon-delivery"]);
-      console.log(JSON.parse(body));
-      res.writeHead(200).end("ok");
-    });
-  })
-  .listen(8443);
-```
+- `src/content/`: Meet detection, caption fallback, and visible controls
+- `src/background/`: `worker-core.mjs` holds the delivery state machine with
+  injected Chrome/crypto/network dependencies; `service-worker.js` only wires
+  Chrome events to it
+- `src/offscreen/`: user-started tab/microphone capture, the two streaming
+  WebSockets, the PCM audio worklet, inline classification, and live/final
+  analysis
+- `src/permissions/`: one-time microphone grant page (the recorder cannot prompt)
+- `src/lib/`: configuration, vCon, caption parsing, storage, retry policy,
+  `transcription.js` (stream URL, result parsing, speaker naming, talk-time
+  stats), `classification.js` (Jev questions and aggregation), and
+  `analysis.js` (SipPulse AI prompt, schema, and vCon analysis)
+- `src/options/`: consent and managed-configuration status
+- `src/popup/`: capture status, AI start action, recoverable outbox, and a
+  local download of the last captured transcript (.md / .vcon) as an escape
+  hatch while the backend is not live
+- `tests/`: dependency-free Node unit tests, including the service-worker
+  state machine against a fake `chrome` object
 
-Expose it over HTTPS for testing with `ngrok http 8443`, then paste the
-ngrok URL into MeetVcon's options page.
+The receiver contract is documented in
+[docs/INTERNAL_INGESTION.md](./docs/INTERNAL_INGESTION.md). The disclosure text
+to publish on a SipPulse-owned page is in [docs/PRIVACY.md](./docs/PRIVACY.md).
 
-## Architecture
+## Security
 
-```
-┌──────────────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│ Content script           │     │ Service worker (MV3) │     │ Options / popup │
-│ (meet.google.com)        │     │                      │     │                 │
-│                          │     │  - delivery queue    │     │  - webhook URL  │
-│  - DOM caption scraper   │────▶│  - retry/backoff     │     │  - bearer token │
-│  - in-call UI panel      │     │  - HMAC signing      │     │  - HMAC secret  │
-│  - end-of-call detector  │     │  - snapshot alarms   │     │  - test send    │
-│  - captions watchdog     │     │  - identity API      │     │  - queue mgmt   │
-└──────────────────────────┘     └──────────┬───────────┘     └─────────────────┘
-                                            │
-                                            ▼
-                                     HTTPS POST (vCon)
-                                            │
-                                            ▼
-                                  user's configured endpoint
-```
+The minimal configuration is the SipPulse AI key plus the vCon store
+(endpoint and HMAC secret). The only built-in endpoint is SipPulse AI's
+public API (`https://api.sippulse.ai`, overridable); the vCon store and any
+other provider are configured by the organization (Google Admin or
+Settings), and Chrome must grant each host (optional host permissions).
+Audio is streamed and never stored.
 
-## Project layout
+Caption records, outbox payloads, and the local "last transcript" copy are
+AES-GCM encrypted before they reach `chrome.storage.local`. Be precise about
+what that buys: the key lives in the extension's IndexedDB in the same Chrome
+profile, so this stops casual reading of extension storage but does **not**
+protect against someone with access to the profile directory on disk.
 
-```
-manifest.json                          MV3 manifest
-PRD.md                                 product spec
-CHANGELOG.md
-LICENSE
-src/
-  lib/
-    logger.js                          shared [MeetVcon] logger
-    selectors.js                       Meet DOM selectors (multilingual)
-    storage.js                         chrome.storage helpers
-    vcon.js                            vCon assembler
-  content/
-    captions-watchdog.js               auto-enable + monitoring
-    transcript-capture.js              caption DOM observer
-    in-call-panel.js                   floating status overlay
-    panel.css
-    main.js                            content-script orchestrator
-  background/
-    service-worker.js                  delivery + retry + alarms
-  options/                             webhook config
-  popup/                               queue + recent-meetings UI
-.github/
-  ISSUE_TEMPLATE/
-  PULL_REQUEST_TEMPLATE.md
-```
+Three pilot limitations must be closed before broad deployment:
 
-## Privacy
+- **Provider keys are in browser policy.** The SipPulse AI and TypeSafe keys
+  are readable on every enrolled machine. Use scoped, rate-limited, rotatable
+  keys, and move to short-lived tokens issued by SipPulse.
+- **Identity is client-asserted.** The collaborator email comes from the Chrome
+  profile and is sent inside the vCon. The backend must not trust it for
+  authorization until the shared HMAC secret is replaced by SSO with
+  server-side validation.
+- **The vCon HMAC secret is shared and readable on every configured machine.**
+  Anyone holding it can post vCons to the CRM; rotate it on both sides.
 
-- Transcripts never leave the device until POSTed to your webhook.
-- No telemetry, no analytics, no third-party services.
-- No external STT or LLM. Transcription is whatever Meet's browser
-  captions produce.
-- Webhook URL, bearer token, and HMAC secret are stored exclusively in
-  `chrome.storage.local` and are never hardcoded in source.
+Report security issues privately to **security@sippulse.com**.
 
-## Legal & consent
+## Documents
 
-Recording or transcribing a meeting may be subject to consent requirements
-in your jurisdiction (e.g., two-party-consent states in the US, GDPR in
-the EU). The in-call panel is non-removable during capture so participants
-can see that transcription is active. You are responsible for obtaining
-participant consent where required.
-
-## Contributing
-
-Issues and PRs welcome. The most common breakage is a Google Meet DOM
-change. If captions stop being captured, look first at
-`src/lib/selectors.js`.
-
-For security issues, email **security@sippulse.com** instead of opening
-a public issue.
-
-## License
-
-[MIT](./LICENSE) © 2026 SipPulse.
+`docs/MANUAL.md` and `docs/MANUAL.pt-BR.md` are the user manual, and
+`docs/pdf/` holds them as PDFs beside the datasheet. The datasheet has no
+Markdown source here: it is built from the SipPulse datasheet template in the
+sibling `sippulse-website` repository
+(`scripts/generate-datasheet-pdf.ts`, slugs `meetvcon` and `meetvcon-en`), so
+it stays in the same layout as every other product's. Regenerate it there with
+`npx tsx scripts/generate-datasheet-pdf.ts meetvcon meetvcon-en` and copy the
+result into `docs/pdf/`.

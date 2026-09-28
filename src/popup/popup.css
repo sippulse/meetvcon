@@ -1,171 +1,144 @@
+:root {
+  color: #17212b;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
 body {
-  width: 360px;
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   margin: 0;
-  padding: 0;
-  color: #202124;
-  background: #fff;
+  width: 360px;
+}
+
+main {
+  padding: 18px;
+}
+
+header,
+.status-card,
+.queue-row {
+  align-items: center;
+  display: flex;
 }
 
 header {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid #e8eaed;
 }
 
-header h1 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+h1,
+h2,
+p {
+  margin-top: 0;
 }
 
-a {
-  color: #006eb7;
-  text-decoration: none;
-  font-size: 12px;
+h1 {
+  font-size: 18px;
+  margin-bottom: 14px;
 }
 
-a:hover {
-  text-decoration: underline;
-}
-
-.section {
-  padding: 10px 14px;
-  border-bottom: 1px solid #f1f3f4;
-}
-
-.section:last-child {
-  border-bottom: 0;
-}
-
-.section h2 {
-  margin: 0 0 8px 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: #5f6368;
+h2 {
+  font-size: 13px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
-.count {
-  background: #e0eef9;
-  color: #192959;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 8px;
-  text-transform: none;
-  letter-spacing: 0;
+.eyebrow {
+  color: #147a44;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  margin-bottom: 2px;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.list li {
-  padding: 8px 0;
-  border-top: 1px solid #f1f3f4;
-}
-
-.list li:first-child {
-  border-top: 0;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.title {
-  font-weight: 500;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.meta {
-  font-size: 11px;
-  color: #5f6368;
-  white-space: nowrap;
-}
-
-.detail {
-  font-size: 12px;
-  color: #5f6368;
-  margin-top: 2px;
-}
-
-.detail .err {
-  color: #c5221f;
-}
-
-.actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.actions button {
-  background: #fff;
-  color: #006eb7;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  padding: 3px 8px;
-  font: inherit;
-  font-size: 11px;
+.link {
+  background: transparent;
+  border: 0;
+  color: #0667c7;
   cursor: pointer;
 }
 
-.actions button:hover {
-  background: #f1f3f4;
+.status-card {
+  background: #f3f6f8;
+  border-radius: 10px;
+  gap: 10px;
+  padding: 14px;
 }
 
-.actions button.danger {
-  color: #c5221f;
-}
-
-.empty {
-  color: #5f6368;
+.status-card p {
+  color: #5d6874;
   font-size: 12px;
-  margin: 4px 0 0 0;
-  font-style: italic;
+  margin: 3px 0 0;
+}
+
+.dot {
+  background: #89939d;
+  border-radius: 50%;
+  height: 10px;
+  width: 10px;
+}
+
+.dot--capturing,
+.dot--delivered {
+  background: #1e9d55;
+}
+
+.dot--finalizing,
+.dot--queued {
+  background: #e39416;
+}
+
+.dot--needs_attention {
+  background: #c9372c;
+}
+
+.primary {
+  background: #116b3b;
+  border: 0;
+  border-radius: 7px;
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+  margin-top: 14px;
+  padding: 11px 14px;
+  width: 100%;
+}
+
+.hint,
+.message {
+  color: #66717c;
+  font-size: 12px;
+  margin: 8px 2px;
+}
+
+.delivery,
+.outbox {
+  border-top: 1px solid #e4e8ec;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.delivery p {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.queue-row {
+  border-top: 1px solid #edf0f3;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.queue-row span {
+  flex: 1;
+  font-size: 11px;
+}
+
+.queue-row button {
+  font-size: 11px;
+}
+
+.danger {
+  color: #ad2118;
 }
 
 .hidden {
   display: none !important;
 }
-
-.webhook-status {
-  padding: 10px 14px;
-  background: #fef7e0;
-  border-bottom: 1px solid #f9c846;
-  font-size: 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.webhook-status .warn {
-  color: #5f6368;
-}
-
-.status-icon {
-  font-size: 11px;
-  margin-right: 4px;
-}
-
-.status-icon.ok    { color: #188038; }
-.status-icon.queue { color: #ea8600; }
-.status-icon.skip  { color: #5f6368; }
-.status-icon.fail  { color: #c5221f; }

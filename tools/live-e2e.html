@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Live capture end-to-end</title>
+  </head>
+  <body>
+    <script>
+      // Stand-ins for the only browser APIs Chrome gives the offscreen
+      // document; tools/live-e2e.cjs drives everything else.
+      window.__messages = [];
+      window.__listeners = [];
+      window.chrome = {
+        runtime: {
+          sendMessage: async (message) => {
+            window.__messages.push({ at: performance.now(), ...message });
+            return { ok: true };
+          },
+          onMessage: { addListener: (fn) => window.__listeners.push(fn) },
+        },
+      };
+      window.__send = (message) =>
+        new Promise((resolve) => {
+          for (const fn of window.__listeners) fn({ target: "offscreen", ...message }, {}, resolve);
+        });
+      // Tab and microphone capture play the generated meeting audio.
+      window.__tracks = {};
+      navigator.mediaDevices.getUserMedia = async (constraints) =>
+        window.__tracks[constraints.audio?.mandatory?.chromeMediaSource === "tab" ? "tab" : "mic"].stream;
+      // The recorder loads its worklet relative to src/offscreen/.
+      const addModule = AudioWorklet.prototype.addModule;
+      AudioWorklet.prototype.addModule = function (url, options) {
+        return addModule.call(this, url === "pcm-worklet.js" ? "../src/offscreen/pcm-worklet.js" : url, options);
+      };
+    </script>
+    <script src="../src/lib/config.js"></script>
+    <script src="../src/lib/transcription.js"></script>
+    <script src="../src/lib/analysis.js"></script>
+    <script src="../src/lib/classification.js"></script>
+    <script src="../src/offscreen/offscreen.js"></script>
+  </body>
+</html>

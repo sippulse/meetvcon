@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "properties": {
+    "SipPulseAiApiKey": {
+      "title": "SipPulse AI API key (notes)",
+      "description": "Required. SipPulse AI key; covers live transcription (pulse-stt-streaming-v1, pt-BR) and meeting notes. Readable on every enrolled machine: use a dedicated, rotatable key with a spending limit.",
+      "type": "string"
+    },
+    "EndpointUrl": {
+      "title": "vCon store endpoint",
+      "description": "Required. HTTPS URL of the vCon store that receives the final vCon (SipPulse: https://crm.sippulse.com/api/vcons/ingest).",
+      "type": "string"
+    },
+    "HmacSecret": {
+      "title": "vCon store HMAC secret",
+      "description": "Required. The vCon store's shared secret (SipPulse CRM: VCON_HMAC_SECRET). Every delivery is signed with X-MeetVcon-Signature: sha256=<HMAC-SHA256 of the body>.",
+      "type": "string"
+    },
+    "SipPulseAiUrl": {
+      "title": "SipPulse AI base URL (notes)",
+      "description": "Optional. HTTPS base of the SipPulse AI API. Defaults to https://api.sippulse.ai.",
+      "type": "string"
+    },
+    "AllowedEmailDomains": {
+      "title": "Allowed collaborator email domains",
+      "description": "Optional. Chrome profile email domains allowed to capture, e.g. [\"sippulse.com\"]. Unset, any signed-in profile may capture.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "TranscriptionSource": {
+      "title": "Where the transcript comes from",
+      "description": "Optional. sippulse_ai (default) streams the call audio to the SipPulse AI gateway. google_captions reads Google Meet's own captions instead, which the extension then switches on; no audio leaves the tab and the SipPulse AI key is used only for the report.",
+      "type": "string",
+      "enum": [
+        "sippulse_ai",
+        "google_captions"
+      ]
+    },
+    "AnalysisMode": {
+      "title": "When to analyse the conversation",
+      "description": "Optional. final (default) runs the notes and the TypeSafe classification once, when the call ends. live also runs them during the call: notes every minute and a tag per line, at a higher cost.",
+      "type": "string",
+      "enum": [
+        "final",
+        "live"
+      ]
+    },
+    "TypeSafeUrl": {
+      "title": "TypeSafe base URL",
+      "description": "Optional. HTTPS base of TypeSafe (.../v1/systemone) to classify intent, sentiment and action items. No default: classification is off unless set.",
+      "type": "string"
+    },
+    "TypeSafeApiKey": {
+      "title": "TypeSafe API key",
+      "description": "Optional. Key for TypeSafeUrl.",
+      "type": "string"
+    },
+    "CaptureEnabled": {
+      "title": "Enable meeting capture",
+      "description": "Optional kill switch. Defaults to enabled.",
+      "type": "boolean"
+    }
+  }
+}

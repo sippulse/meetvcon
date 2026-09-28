@@ -2,21 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>MeetVcon panel preview</title>
-  <link rel="stylesheet" href="../src/content/panel.css" />
+  <title>MeetVcon side panel preview</title>
   <style>
     body {
       margin: 0;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #fff;
       background: #202124;
-      min-height: 100vh;
-      overflow: hidden;
     }
     .meet-mock {
       position: relative;
-      width: 100%;
-      height: 100vh;
+      flex: 1;
       background:
         radial-gradient(circle at 30% 40%, #2a3042 0%, #1a1c20 60%),
         #202124;
@@ -41,17 +40,18 @@
     }
     .video-tile.thumb {
       bottom: 60px;
-      width: 200px;
-      height: 120px;
+      width: 180px;
+      height: 110px;
       font-size: 14px;
     }
     .thumb1 { left: 60px; }
-    .thumb2 { left: 280px; }
-    .thumb3 { left: 500px; }
+    .thumb2 { left: 260px; }
+    .thumb3 { left: 460px; }
     .controls-bar {
       position: absolute;
       bottom: 16px;
-      right: 280px;
+      left: 50%;
+      transform: translateX(-50%);
       display: flex;
       gap: 12px;
       background: rgba(60, 64, 67, 0.8);
@@ -69,21 +69,12 @@
       color: #e8eaed;
       font-size: 16px;
     }
-    .caption-strip {
-      position: absolute;
-      left: 50%;
-      bottom: 220px;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
-      color: #fff;
-      font-size: 18px;
-      padding: 10px 18px;
-      border-radius: 4px;
-      max-width: 720px;
-    }
-    .caption-strip strong {
-      color: #8ab4f8;
-      margin-right: 8px;
+    /* Chrome's side panel: its own column beside the page, not an overlay. */
+    iframe {
+      width: 400px;
+      height: 100vh;
+      border: 0;
+      border-left: 1px solid #000;
     }
   </style>
 </head>
@@ -91,12 +82,8 @@
   <div class="meet-mock">
     <div class="video-tile main">Jane Doe</div>
     <div class="video-tile thumb thumb1">You</div>
-    <div class="video-tile thumb thumb2">Bob</div>
+    <div class="video-tile thumb thumb2">Bruno</div>
     <div class="video-tile thumb thumb3">Alice</div>
-
-    <div class="caption-strip">
-      <strong>Jane Doe:</strong>Thanks everyone for joining. Let's start with the pipeline review.
-    </div>
 
     <div class="controls-bar">
       <div class="control">M</div>
@@ -104,17 +91,10 @@
       <div class="control">CC</div>
       <div class="control">L</div>
     </div>
-
-    <div class="meetvcon-panel" id="meetvcon-panel">
-      <div class="meetvcon-row">
-        <span class="meetvcon-dot meetvcon-dot--green"></span>
-        <span class="meetvcon-title">MeetVcon</span>
-      </div>
-      <div class="meetvcon-row meetvcon-status">Capturing captions</div>
-      <div class="meetvcon-row meetvcon-actions">
-        <button class="meetvcon-btn">Disable for this call</button>
-      </div>
-    </div>
   </div>
+
+  <!-- The real side panel page. tools/screenshot.js stubs chrome.* and feeds
+       it one snapshot, so this is the shipped code, not a mock of it. -->
+  <iframe src="../src/sidepanel/sidepanel.html" title="SipPulse Meet Capture side panel"></iframe>
 </body>
 </html>
