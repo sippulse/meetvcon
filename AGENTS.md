@@ -14,6 +14,7 @@ There is no compile step; Chromium loads the repository root directly.
 - `npm test` runs the Node test suite.
 - `npm run check` syntax-checks JavaScript in `src/`, `tools/`, and `tests/`.
 - `npm run screenshots` launches Chromium and regenerates the three store images.
+- `npm run package` writes `dist/meetvcon-<version>.zip` for the Chrome Web Store: the manifest, the policy schema, `icons/` and `src/`, nothing else. It refuses to build when `manifest.json` and `package.json` disagree on the version.
 
 For local development, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this repository. Configure it from the options page Settings card (or Google Admin policy, see `INSTALL.md`); capture fails closed until the vCon endpoint and token are set.
 

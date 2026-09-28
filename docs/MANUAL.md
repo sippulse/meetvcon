@@ -170,4 +170,4 @@ Questions about privacy: security@sippulse.com
 
 ---
 
-*SipPulse Meet Capture 0.3.0*
+*SipPulse Meet Capture 1.0.0*

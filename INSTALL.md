@@ -93,6 +93,15 @@ Open the extension's options page (**Settings** in the popup), fill the
 keep the stored key; **Remove local settings** clears everything saved on that
 computer. Then use **Test connections**.
 
+### Packaging for the Chrome Web Store
+
+`npm run package` writes `dist/meetvcon-<version>.zip` with the manifest, the
+policy schema, `icons/` and `src/`. Tests, tools, docs and store images stay
+out. Bump the version in both `package.json` and `manifest.json` first, or the
+script refuses to build: the store reads the manifest, and a mismatch publishes
+the wrong number. Upload that zip in the Web Store dashboard, then force-install
+the published ID through Google Admin.
+
 ### Developer installation
 
 1. Run `npm install`, `npm test`, and `npm run check`.

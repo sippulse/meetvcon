@@ -13,7 +13,7 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 
-# Build output (none today, reserved)
+# Build output: the Chrome Web Store zip from `npm run package`
 dist/
 build/
 *.zip
