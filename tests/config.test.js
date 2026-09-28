@@ -79,7 +79,11 @@ test("one SipPulse AI pair serves transcription and notes; there is no second pr
   assert.equal(legacy.transcription.streamBase, "wss://api.sippulse.ai");
   assert.equal(legacy.transcription.apiKey, "sp");
   assert.deepEqual([...legacy.origins], ["https://api.sippulse.ai/*"], "no host is asked for Deepgram");
-  assert.deepEqual([...config.LOCAL_FIELDS].filter((field) => field.startsWith("Transcription")), []);
+  assert.deepEqual(
+    [...config.LOCAL_FIELDS].filter((field) => field.startsWith("Transcription")),
+    ["TranscriptionSource"],
+    "the only transcription setting left is which source to use"
+  );
 });
 
 test("the models are fixed, and nothing is ready without a key", () => {
@@ -124,6 +128,25 @@ test("a delivery target only needs an https endpoint and a secret", () => {
   assert.equal(config.deliveryTarget("https://crm.example.com/i", "s").ok, true);
   assert.match(config.deliveryTarget("http://crm.example.com/i", "s").error, /https/);
   assert.match(config.deliveryTarget("https://crm.example.com/i", "").error, /secret/);
+});
+
+test("the transcript source is configurable, and Google captions need nothing to start", () => {
+  const { config } = loadLibrary("src/lib/config.js");
+  const base = { SipPulseAiApiKey: "sp", EndpointUrl: "https://crm.example.com/i", HmacSecret: "s" };
+
+  const streaming = config.normalize(base);
+  assert.equal(streaming.transcriptionSource, "sippulse_ai", "call audio by default");
+  assert.equal(streaming.liveTranscriptionReady, true);
+
+  const captions = config.normalize({ ...base, TranscriptionSource: "google_captions" });
+  assert.equal(captions.transcriptionSource, "google_captions");
+  assert.equal(captions.configured, true, "captures without streaming anything");
+  assert.equal(captions.liveTranscriptionReady, false, "there is no audio capture to start");
+  assert.equal(captions.analysisReady, true, "the key still writes the report");
+
+  const bogus = config.normalize({ ...base, TranscriptionSource: "whisper" });
+  assert.match(bogus.errors.TranscriptionSource, /sippulse_ai, google_captions/);
+  assert.equal(bogus.transcriptionSource, "sippulse_ai", "an unknown source falls back to the safe one");
 });
 
 test("analysis runs at the end of the call unless the mode says otherwise", () => {

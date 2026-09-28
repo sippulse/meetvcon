@@ -23,6 +23,10 @@
   if (ns.config) return;
 
   // The streaming model and its parameters live in src/lib/transcription.js.
+  // Where the transcript comes from. "sippulse_ai" streams the call audio to
+  // the gateway. "google_captions" reads Meet's own captions instead, and is
+  // the only mode that turns captions on, because then they are the source.
+  const TRANSCRIPTION_SOURCES = Object.freeze(["sippulse_ai", "google_captions"]);
   // "final": notes and per-line classification run once, when the call ends.
   // "live": notes refresh during the call and each finished line is classified
   // as it lands (tags in the panel).
@@ -42,6 +46,7 @@
   const DEFAULTS = Object.freeze({
     sippulseAiUrl: DEFAULT_SIPPULSE_AI_URL,
     analysisMode: "final",
+    transcriptionSource: "sippulse_ai",
     captureEnabled: true,
     // Empty = no restriction on which signed-in profile may capture.
     allowedEmailDomains: [],
@@ -52,6 +57,7 @@
     "HmacSecret",
     "AllowedEmailDomains",
     "AnalysisMode",
+    "TranscriptionSource",
     "SipPulseAiUrl",
     "SipPulseAiApiKey",
     "TypeSafeUrl",
@@ -148,6 +154,11 @@
     if (!ANALYSIS_MODES.includes(analysisMode)) {
       errors.AnalysisMode = `AnalysisMode must be one of ${ANALYSIS_MODES.join(", ")}`;
     }
+    const requested = text(raw.TranscriptionSource) || DEFAULTS.transcriptionSource;
+    if (!TRANSCRIPTION_SOURCES.includes(requested)) {
+      errors.TranscriptionSource = `TranscriptionSource must be one of ${TRANSCRIPTION_SOURCES.join(", ")}`;
+    }
+    const transcriptionSource = errors.TranscriptionSource ? DEFAULTS.transcriptionSource : requested;
     const store = withoutTrailingSlash(raw.EndpointUrl);
     // An invalid URL is reported, never silently replaced by the default.
     const sippulse = isSet(raw.SipPulseAiUrl) ? withoutTrailingSlash(raw.SipPulseAiUrl) : DEFAULTS.sippulseAiUrl;
@@ -179,9 +190,12 @@
         errors.SipPulseAiUrl ||
         (configured ? "" : `Configure ${missing.join(", ")} in Google Admin or in Settings`),
       errors,
+      transcriptionSource,
       // SipPulse AI serves streaming transcription and notes from one API
-      // with one key.
-      liveTranscriptionReady: !!sippulse && !!sippulseAiApiKey,
+      // with one key. On google_captions there is nothing to start: Meet
+      // writes the transcript and the key is only used for the report.
+      liveTranscriptionReady:
+        transcriptionSource === "sippulse_ai" && !!sippulse && !!sippulseAiApiKey,
       analysisReady: !!sippulse && !!sippulseAiApiKey,
       classificationReady: !!typesafe && !!typesafeApiKey,
       transcription: {
@@ -219,6 +233,7 @@
     DEFAULTS,
     DEFAULT_SIPPULSE_AI_URL,
     ANALYSIS_MODES,
+    TRANSCRIPTION_SOURCES,
     ANALYSIS,
     CLASSIFICATION,
     LOCAL_FIELDS,

@@ -29,6 +29,15 @@
         "type": "string"
       }
     },
+    "TranscriptionSource": {
+      "title": "Where the transcript comes from",
+      "description": "Optional. sippulse_ai (default) streams the call audio to the SipPulse AI gateway. google_captions reads Google Meet's own captions instead, which the extension then switches on; no audio leaves the tab and the SipPulse AI key is used only for the report.",
+      "type": "string",
+      "enum": [
+        "sippulse_ai",
+        "google_captions"
+      ]
+    },
     "AnalysisMode": {
       "title": "When to analyse the conversation",
       "description": "Optional. final (default) runs the notes and the TypeSafe classification once, when the call ends. live also runs them during the call: notes every minute and a tag per line, at a higher cost.",

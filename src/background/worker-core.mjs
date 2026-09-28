@@ -242,6 +242,9 @@ export function createWorkerCore({
     if (!config.configured || !config.captureEnabled) {
       return { ok: false, error: config.error || "Capture is disabled by SipPulse" };
     }
+    if (config.transcriptionSource === "google_captions") {
+      return { ok: false, error: "This organization captures Google captions, not call audio" };
+    }
     if (!config.liveTranscriptionReady) {
       return { ok: false, error: "Live transcription is not configured by SipPulse" };
     }
@@ -360,11 +363,13 @@ export function createWorkerCore({
     const profile = await requireProfile();
     if (!profile) return { ok: false, error: "Collaborator email unavailable" };
 
+    const captionsOnly = !session && config.transcriptionSource === "google_captions";
     const fallback = assembleVcon(
       record,
       deliveryKind,
       session ? "google_captions_fallback" : "google_captions",
-      profile
+      profile,
+      captionsOnly ? await captionsReport(record, config) : null
     );
     if (record.utterances?.length) await saveLastTranscript(fallback, record);
 
@@ -490,6 +495,37 @@ export function createWorkerCore({
     return deliverCaptions(record, fallback, meetingId, deliveryKind);
   }
 
+  // With Google captions as the source there is no recorder to write the
+  // report, so the worker asks SipPulse AI itself. The transcript is whatever
+  // Meet's captions gave us.
+  async function captionsReport(record, config) {
+    if (!config.analysisReady || !record.utterances?.length) return null;
+    try {
+      const result = await analysis.analyze({
+        fetch,
+        apiBase: config.analysis.apiBase,
+        apiKey: config.sippulseAiApiKey,
+        model: config.analysis.model,
+        kind: "final",
+        transcript: transcription.transcriptText(record.utterances),
+        subject: record.subject || "",
+        stats: transcription.speakerStats(record.utterances),
+      });
+      return result?.ok
+        ? analysis.toVconAnalysis({
+            analysis: result.analysis,
+            model: config.analysis.model,
+            stats: transcription.speakerStats(record.utterances),
+            dialogCount: record.utterances.length,
+            generatedAt: iso(),
+          })
+        : null;
+    } catch (error) {
+      log.warn("captions report failed; delivering the transcript alone", error?.message || error);
+      return null;
+    }
+  }
+
   async function deliverCaptions(record, fallback, meetingId, deliveryKind) {
     if (!record.utterances?.length) {
       await removeActiveMeeting(meetingId);
@@ -550,12 +586,13 @@ export function createWorkerCore({
     await storage.setDeliveryStatus({ state: "disabled_for_call", error: "" });
   }
 
-  function assembleVcon(record, deliveryKind, transcriptionSource, profile) {
+  function assembleVcon(record, deliveryKind, transcriptionSource, profile, analysisEntries = null) {
     return vcon.assemble(record, {
       capturedBy: `SipPulse Meet Capture/${version}`,
       deliveryKind,
       transcriptionSource,
       capturedByUser: profile,
+      ...(analysisEntries?.length ? { analysis: analysisEntries } : {}),
     });
   }
 
@@ -905,7 +942,7 @@ export function createWorkerCore({
         configured: config.configured,
         captureEnabled: config.captureEnabled,
         liveTranscriptionReady: config.liveTranscriptionReady,
-        transcriptionProvider: config.transcription.provider,
+        transcriptionSource: config.transcriptionSource,
         analysisReady: config.analysisReady,
         classificationReady: config.classificationReady,
         analysisMode: config.analysis.mode,

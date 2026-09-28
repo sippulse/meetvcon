@@ -49,7 +49,10 @@ Transcription sources:
 - `sippulse_ai_live_recovered` — the recorder did not report back; the
   transcript was rebuilt from segments saved during the call, with the latest
   live notes and the classifications made so far
-- `google_captions` — live transcription was never started
+- `google_captions` — live transcription was never started, or the
+  organization set `TranscriptionSource: google_captions`, in which case the
+  worker writes the report itself and the vCon carries `analysis[]` without any
+  audio ever having been streamed
 - `google_captions_fallback` — live transcription produced nothing usable
 
 Responses:

@@ -62,8 +62,9 @@
     }
     // In a call, with nothing streaming: say which of the two is capturing.
     if (capturing(snapshot)) {
-      return snapshot.captionsOn
-        ? { tone: "green", text: STATES.active[1] }
+      if (snapshot.captionsOn) return { tone: "green", text: STATES.active[1] };
+      return snapshot.captionsMode
+        ? { tone: "amber", text: "Turning Google captions on…" }
         : { tone: "grey", text: STATES.off[1] };
     }
     const [tone, text] = STATES[snapshot.status] || STATES.capture_error;
@@ -129,6 +130,8 @@
         ? ""
         : snapshot.audioActive
         ? "Written by SipPulse AI from the call audio"
+        : snapshot.captionsMode
+        ? "Google's captions, which this organization uses as the transcript"
         : "Copied from Google's captions. Start live transcription for speaker names and AI notes.",
       lines,
     };

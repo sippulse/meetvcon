@@ -233,6 +233,53 @@ async function startLive(core, meetingId = "abc-defg-hij", tabId = 42) {
   return send(core, { type: "start_ai_capture", meetingId, tabId });
 }
 
+test("on Google captions the worker writes the report itself, with no recorder in the call", async () => {
+  const report = {
+    language: "pt",
+    title: "Proposta Vivanet",
+    headline: "Ana aprovou dez por cento.",
+    summary: "Fechado com dez por cento.",
+    key_points: ["Vinte mil assinantes"],
+    decisions: [{ decision: "Dez por cento", rationale: "quinze era alto" }],
+    action_items: [{ owner: "Ana", task: "Enviar a proposta", due: "sexta" }],
+    next_step: "Kick off na segunda",
+    numbers: [],
+    risks: [],
+    open_questions: [],
+    topics: [],
+  };
+  const { core, chrome, fetch } = await setup({
+    policy: { TranscriptionSource: "google_captions" },
+    // The store answers 202; SipPulse AI answers the report.
+    fetchResponder: (url) =>
+      url.startsWith("https://api.sippulse.ai/")
+        ? { status: 200, body: { choices: [{ message: { content: JSON.stringify(report) } }] } }
+        : { status: 202 },
+  });
+
+  assert.equal(
+    (await send(core, { type: "get_popup_state" })).config.liveTranscriptionReady,
+    false,
+    "there is no audio capture to offer"
+  );
+  await send(core, { type: "active_meeting_put", record: record() });
+  assert.match(
+    (await send(core, { type: "start_ai_capture", meetingId: "abc-defg-hij", tabId: 42 })).error,
+    /Google captions/
+  );
+
+  assert.equal((await send(core, { type: "call_ended", meetingId: "abc-defg-hij" })).ok, true);
+  const delivered = JSON.parse(fetch.calls.find((call) => call.url === ENDPOINT).init.body);
+  assert.equal(delivered.attachments[0].body.transcription_source, "google_captions");
+  assert.equal(delivered.analysis[0].type, "summary");
+  assert.equal(delivered.analysis[0].body, "Fechado com dez por cento.");
+  assert.equal(delivered.analysis[1].type, "meeting_insights");
+  assert.equal(delivered.analysis[1].body.headline, "Ana aprovou dez por cento.");
+  assert.deepEqual(delivered.analysis[1].body.action_items, [
+    { owner: "Ana", task: "Enviar a proposta", due: "sexta" },
+  ]);
+});
+
 test("stopping live transcription keeps the call, and starting again resumes the same transcript", async () => {
   const { core, chrome } = await setup({
     chromeOptions: {

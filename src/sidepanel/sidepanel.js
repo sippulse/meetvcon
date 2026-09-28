@@ -80,6 +80,7 @@ function configError() {
   if (!worker?.ok) return "";
   if (!worker.config.configured) return worker.config.error || "The extension is not configured yet";
   if (!worker.config.captureEnabled) return "Capture is switched off by your administrator";
+  if (worker.config.transcriptionSource === "google_captions") return "";
   if (!worker.config.liveTranscriptionReady) return "The SipPulse AI key is not set, so only Google captions are captured";
   return "";
 }
@@ -240,6 +241,7 @@ function render() {
     ...(snapshot || { status: tab && port ? "idle" : "state_unavailable" }),
     configError: problem,
     liveReady: worker?.ok ? worker.config.liveTranscriptionReady : undefined,
+    captionsMode: worker?.ok && worker.config.transcriptionSource === "google_captions",
   });
   elements.dot.className = `dot dot--${model.header.tone}`;
   elements.status.textContent = model.header.text;

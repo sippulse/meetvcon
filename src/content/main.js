@@ -48,7 +48,8 @@
       return;
     }
 
-    captionsWatchdog.start();
+    // Captions are only switched on when they are the transcript source.
+    captionsWatchdog.start({ enable: state.config.transcriptionSource === "google_captions" });
     activeSpeaker.start();
     transcriptCapture.start();
     const meeting = await transcriptCapture.startMeeting();

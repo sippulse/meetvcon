@@ -20,7 +20,9 @@ Data is used only for the stated transcription, analysis, and delivery
 purpose. Processors:
 
 - **SipPulse AI's streaming service** receives the live audio stream and
-  returns the transcript.
+  returns the transcript. On `TranscriptionSource: google_captions` this does
+  not happen at all: no audio leaves the tab, and Google's captions are the
+  transcript.
 - **SipPulse AI** receives transcript text during and after the call to write
   notes: summary, topics, action items, decisions, and open questions.
 - **TypeSafe** receives each transcript line, with the line before it, and

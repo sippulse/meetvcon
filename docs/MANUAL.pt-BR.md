@@ -52,6 +52,11 @@ próprio Chrome, na barra de ferramentas.
 
 Nada é desenhado por cima da página do Meet. O painel é a interface.
 
+Se o seu administrador definiu a fonte da transcrição como **legendas do
+Google**, não há botão para apertar: a extensão liga as legendas, lê o que
+elas escrevem e gera o relatório no fim. O resto desta seção vale para o
+padrão, em que a SipPulse AI transcreve o áudio da chamada.
+
 ### Inicie a transcrição ao vivo
 
 Clique em **Start live transcription** no painel. A linha de status fica

@@ -29,6 +29,7 @@ Each setting is read from two places, field by field:
 |---|---|
 | `SipPulseAiUrl` | HTTPS base of SipPulse AI. Defaults to `https://api.sippulse.ai` |
 | `AllowedEmailDomains` | Restrict which Chrome profiles may capture, e.g. `["sippulse.com"]`. Unset, any signed-in profile may |
+| `TranscriptionSource` | `sippulse_ai` (default) streams the call audio to SipPulse AI. `google_captions` reads Meet's own captions instead, and is the only mode that switches captions on; no audio leaves the tab, and the SipPulse AI key is used only for the report |
 | `AnalysisMode` | `final` (default) analyses once, when the call ends. `live` also analyses during the call: notes every minute and a tag per line, at a higher cost |
 | `TypeSafeUrl` + `TypeSafeApiKey` | Intent, sentiment and action-item classification with TypeSafe Jev, e.g. `https://api.typesafe.ai`. No default: classification is off unless set |
 | `CaptureEnabled` | `false` disables capture (policy only) |

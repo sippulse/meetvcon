@@ -20,10 +20,17 @@ experience for Portuguese (pt-BR) meetings, without a bot joining the call.
    unless `AllowedEmailDomains` policy says otherwise).
 2. Google captions are read when the collaborator has them on, and stored only
    in the encrypted local recovery record until final delivery. The extension
-   never turns captions on: forcing them changed what every participant saw on
-   screen. Their labels are what name remote speakers, so a call captured
-   without captions records remote speech as *Participant*.
-3. The collaborator starts live transcription with one extension action. The
+   turns captions on only where they are the configured transcript source:
+   forcing them otherwise changed what every participant saw on screen for a
+   fallback nobody asked for. Their labels are what name remote speakers,
+   alongside the participant tiles, so a call captured with captions off can
+   still record a remote voice as *Participant*.
+3. `TranscriptionSource` decides where the transcript comes from. On
+   `sippulse_ai`, the default, the collaborator starts live transcription and
+   the call audio streams to the gateway. On `google_captions` nothing streams:
+   the extension switches Meet's captions on, reads them, and the SipPulse AI
+   key is spent only on the report at the end.
+4. The collaborator starts live transcription with one extension action. The
    Meet tab (remote participants) and local microphone stream as separate mono
    streams over `/v1/listen` to the SipPulse AI gateway
    (`pulse-stt-streaming-v1`, pt-BR). It starts from the side panel, which

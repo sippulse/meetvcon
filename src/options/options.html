@@ -82,6 +82,14 @@
               <input name="AllowedEmailDomains" type="text" placeholder="any signed-in account when empty" />
             </label>
             <label class="field">
+              <span>Transcript source <em data-source="TranscriptionSource"></em></span>
+              <select name="TranscriptionSource">
+                <option value="">SipPulse AI, from the call audio (default)</option>
+                <option value="sippulse_ai">SipPulse AI, from the call audio</option>
+                <option value="google_captions">Google captions (turned on automatically, no audio leaves the tab)</option>
+              </select>
+            </label>
+            <label class="field">
               <span>When to analyse <em data-source="AnalysisMode"></em></span>
               <select name="AnalysisMode">
                 <option value="">When the call ends (default)</option>

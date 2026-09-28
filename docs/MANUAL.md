@@ -51,6 +51,11 @@ toolbar.
 
 Nothing is drawn on top of the Meet page. The panel is the interface.
 
+If your administrator set the transcript source to **Google captions**, there
+is no button to press: the extension switches captions on, reads them, and
+writes the report at the end. The rest of this section is about the default,
+where SipPulse AI transcribes the call audio.
+
 ### Start live transcription
 
 Click **Start live transcription** in the panel. The status line turns red and
