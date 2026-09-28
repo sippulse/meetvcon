@@ -55,6 +55,27 @@ test("the header says what is happening, and streaming trouble is visible", () =
   assert.equal(panelModel.build({ status: "idle" }).showViews, false);
 });
 
+test("a missing key is said out loud, and no button pretends transcription can start", () => {
+  const panelModel = load();
+  const blocked = panelModel.build({
+    status: "idle",
+    configError: "The SipPulse AI key is not set, so only Google captions are captured",
+  });
+  assert.equal(blocked.header.text, "The SipPulse AI key is not set, so only Google captions are captured");
+  assert.equal(blocked.header.tone, "amber");
+  assert.deepEqual(plain(blocked.action), { id: "setup", label: "Open settings" });
+  assert.equal(blocked.canStart, false);
+
+  // The key is missing while a call is already being captured from captions.
+  assert.equal(panelModel.build(snapshot({ audioActive: false, liveReady: false })).canStart, false);
+  assert.equal(panelModel.build(snapshot({ audioActive: false, liveReady: true })).canStart, true);
+  assert.equal(
+    panelModel.build(snapshot({ audioActive: false })).canStart,
+    true,
+    "with nothing known about the worker, the button stays and the error explains itself"
+  );
+});
+
 test("a turn names its speaker once and interim speech is marked", () => {
   const panelModel = load();
   const view = panelModel.build(snapshot({ interim: { 0: "estou pensando" } })).transcript;
@@ -145,6 +166,8 @@ test("speakers show talk share, and the call can be stopped while it runs", () =
   assert.match(model.speakers.rows[0].title, /turns/);
   assert.deepEqual(plain(model.action), { id: "discard", label: "Stop and discard this call" });
   assert.equal(model.canStart, false, "live transcription is already on");
+  assert.equal(model.canStop, true, "stopping is offered while audio is streaming");
+  assert.equal(panelModel.build(snapshot({ audioActive: false })).canStop, false);
   assert.equal(panelModel.build(snapshot({ audioActive: false })).canStart, true, "capture runs, audio does not");
   assert.equal(panelModel.build({ status: "setup_required" }).canStart, false, "capture never started");
   assert.match(model.consent, /vCon store/);

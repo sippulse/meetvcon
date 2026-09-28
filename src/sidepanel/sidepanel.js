@@ -9,6 +9,7 @@ const PORT_NAME = "meetvcon-panel";
 const MICROPHONE_PAGE = "src/permissions/microphone.html";
 const MEET_URL = "https://meet.google.com/";
 const TICK_MS = 2_000;
+const WORKER_MS = 10_000;
 
 const elements = {
   dot: document.getElementById("dot"),
@@ -24,6 +25,9 @@ const elements = {
 let tab = null;
 let port = null;
 let snapshot = null;
+// What the worker knows and the Meet page does not: whether the extension is
+// configured at all.
+let worker = null;
 let activeTab = "transcript";
 let pinned = true;
 
@@ -66,6 +70,20 @@ async function tick() {
   if (changed || (tab && !port)) connect();
 }
 
+async function refreshWorker() {
+  worker = await chrome.runtime.sendMessage({ type: "get_popup_state" }).catch(() => null);
+  render();
+}
+
+// The missing piece, in the panel's own words, whether or not a call is running.
+function configError() {
+  if (!worker?.ok) return "";
+  if (!worker.config.configured) return worker.config.error || "The extension is not configured yet";
+  if (!worker.config.captureEnabled) return "Capture is switched off by your administrator";
+  if (!worker.config.liveTranscriptionReady) return "The SipPulse AI key is not set, so only Google captions are captured";
+  return "";
+}
+
 // ---- actions ----------------------------------------------------------------
 
 async function startLive(button) {
@@ -91,9 +109,25 @@ async function startLive(button) {
       return;
     }
     elements.message.textContent = result?.ok ? "Live transcription started." : result?.error || "Audio capture failed";
+    await refreshWorker();
   } finally {
     button.disabled = false;
   }
+}
+
+// Stops the audio, keeps the transcript. Starting again continues the same one.
+async function stopLive(button) {
+  button.disabled = true;
+  elements.message.textContent = "Stopping…";
+  const result = await chrome.runtime.sendMessage({
+    type: "stop_ai_capture",
+    meetingId: snapshot.meetingId,
+  });
+  elements.message.textContent = result?.ok
+    ? "Live transcription stopped. Start it again to continue this transcript."
+    : result?.error || "Could not stop";
+  button.disabled = false;
+  await refreshWorker();
 }
 
 function button(className, label, onClick) {
@@ -108,10 +142,16 @@ function button(className, label, onClick) {
 function renderPrimary(model) {
   elements.primary.replaceChildren();
   if (model.canStart) {
-    elements.primary.append(button("btn btn--primary", "Start live transcription", startLive));
+    const resuming = (snapshot?.utterances || []).length > 0;
+    elements.primary.append(
+      button("btn btn--primary", resuming ? "Resume live transcription" : "Start live transcription", startLive)
+    );
     elements.primary.append(
       el("p", "hint", "Streams this tab's audio and your microphone for an accurate, speaker-labelled transcript.")
     );
+  }
+  if (model.canStop) {
+    elements.primary.append(button("btn", "Stop live transcription", stopLive));
   }
   if (model.action) {
     const discard = model.action.id === "discard";
@@ -185,7 +225,8 @@ function renderSpeakers(view) {
 }
 
 function render() {
-  if (!tab) {
+  const problem = configError();
+  if (!tab && !problem) {
     elements.dot.className = "dot dot--grey";
     elements.status.textContent = "Open a Google Meet to begin";
     elements.primary.replaceChildren();
@@ -194,7 +235,11 @@ function render() {
     elements.consent.textContent = "";
     return;
   }
-  const model = panelModel.build(snapshot || { status: port ? "idle" : "state_unavailable" });
+  const model = panelModel.build({
+    ...(snapshot || { status: tab && port ? "idle" : "state_unavailable" }),
+    configError: problem,
+    liveReady: worker?.ok ? worker.config.liveTranscriptionReady : undefined,
+  });
   elements.dot.className = `dot dot--${model.header.tone}`;
   elements.status.textContent = model.header.text;
   elements.consent.textContent = model.consent;
@@ -218,4 +263,6 @@ elements.body.addEventListener("scroll", () => {
 elements.settings.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 setInterval(tick, TICK_MS);
+setInterval(refreshWorker, WORKER_MS);
 tick();
+refreshWorker();

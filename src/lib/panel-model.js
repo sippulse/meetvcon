@@ -47,6 +47,9 @@
   }
 
   function header(snapshot) {
+    // A missing key or endpoint is worth saying before the meeting starts, not
+    // after someone waits for a transcript that was never going to come.
+    if (snapshot.configError) return { tone: "amber", text: snapshot.configError };
     if (snapshot.audioActive && capturing(snapshot.status)) {
       const stream = snapshot.transcriptionState;
       if (stream === "reconnecting" || stream === "error") {
@@ -59,6 +62,7 @@
   }
 
   function action(snapshot) {
+    if (snapshot.configError) return { id: "setup", label: "Open settings" };
     if (capturing(snapshot.status)) return { id: "discard", label: "Stop and discard this call" };
     if (["setup_required", "identity_required", "managed_disabled"].includes(snapshot.status)) {
       return { id: "setup", label: "Review setup" };
@@ -223,8 +227,13 @@
       header: header(state),
       showViews: capturing(state.status) || state.audioActive || list(state.utterances).length > 0,
       // Capture only runs once consent, identity and configuration passed, so
-      // "capturing but no audio yet" is exactly when live transcription can start.
-      canStart: capturing(state.status) && !state.audioActive,
+      // "capturing but no audio yet" is exactly when live transcription can
+      // start. liveReady comes from the worker: without a key there is nothing
+      // to start, and the panel says so instead of offering a button that fails.
+      canStart: capturing(state.status) && !state.audioActive && state.liveReady !== false,
+      // Stopping is not discarding. The transcript stays, and starting again
+      // continues it.
+      canStop: !!state.audioActive,
       transcript: transcriptView(state),
       notes: notesView(state),
       speakers: speakersView(state),

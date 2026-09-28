@@ -233,6 +233,54 @@ async function startLive(core, meetingId = "abc-defg-hij", tabId = 42) {
   return send(core, { type: "start_ai_capture", meetingId, tabId });
 }
 
+test("stopping live transcription keeps the call, and starting again resumes the same transcript", async () => {
+  const { core, chrome } = await setup({
+    chromeOptions: {
+      onRuntimeMessage: (message) =>
+        message.type === "ai_capture_start" ? { ok: true, streamStartedAt: "2026-09-04T12:00:00.500Z" } : { ok: true },
+    },
+  });
+  await startLive(core);
+
+  const stopped = await send(core, { type: "stop_ai_capture", meetingId: "abc-defg-hij" });
+  assert.equal(stopped.ok, true);
+  assert.equal(
+    chrome.runtime._messages.some((m) => m.type === "ai_capture_cancel"),
+    true,
+    "the recorder is told to drop the streams, not to deliver"
+  );
+  assert.deepEqual((await send(core, { type: "get_popup_state" })).aiMeetingIds, [], "no session is recording");
+  assert.deepEqual(
+    chrome.tabs._messages.at(-1).message,
+    { type: "ai_capture_state", meetingId: "abc-defg-hij", active: false },
+    "the Meet page learns the audio stopped, so the panel offers to start again"
+  );
+  assert.equal(
+    (await send(core, { type: "get_popup_state" })).status.state,
+    "capturing",
+    "the call is still being captured from Google captions"
+  );
+
+  // The page kept transcribing into the record while the recorder was off.
+  const resumedRecord = {
+    ...record(),
+    liveStreamStartedAt: "2026-09-04T12:00:00.500Z",
+    liveSegments: [{ id: 7, channel: 1, speaker: null, text: "Já falamos disso.", start: 4, end: 6 }],
+    liveClassifications: { 7: { intent: "information", intent_confidence: 0.9, sentiment: 0, action_item: 0.1 } },
+  };
+  await send(core, { type: "active_meeting_put", record: resumedRecord });
+  assert.equal((await send(core, { type: "start_ai_capture", meetingId: "abc-defg-hij", tabId: 42 })).ok, true);
+
+  const restart = chrome.runtime._messages.filter((m) => m.type === "ai_capture_start").at(-1);
+  assert.equal(restart.resume.streamStartedAt, "2026-09-04T12:00:00.500Z", "one timeline for the whole call");
+  assert.deepEqual(
+    restart.resume.segments.map((segment) => segment.id),
+    [7],
+    "what was already said travels with the restart"
+  );
+  assert.deepEqual(Object.keys(restart.resume.classifications), ["7"]);
+});
+
 test("live capture obtains the tab stream in the worker, hands the recorder its keys and endpoints, and tells the Meet tab", async () => {
   const { core, chrome } = await setup({
     chromeOptions: {

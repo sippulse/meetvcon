@@ -392,6 +392,14 @@ async function startCapture(message) {
   const streams = await openStreams(message.streamId);
   if (streams.error) return streams.error;
 
+  // Restarting after a stop: keep the first half of the call, and place the
+  // new audio where it really belongs on that timeline. The gap is silence
+  // nobody transcribed, which is exactly what it was.
+  const resume = message.resume?.streamStartedAt ? message.resume : null;
+  const resumed = resume ? resume.segments || [] : [];
+  const elapsedSec = resume ? Math.max(0, (Date.now() - Date.parse(resume.streamStartedAt)) / 1000) : 0;
+  const framesSent = Math.round(elapsedSec * transcription.PROFILE.sampleRate);
+
   const current = {
     meetingId: message.meetingId,
     config: message.config,
@@ -402,16 +410,16 @@ async function startCapture(message) {
     tabStream: streams.tabStream,
     microphoneStream: streams.microphoneStream,
     profile: transcription.PROFILE,
-    streamStartedAt: new Date().toISOString(),
+    streamStartedAt: resume ? resume.streamStartedAt : new Date().toISOString(),
     streams: Object.fromEntries(
       transcription.CHANNELS.map((channel) => [
         channel,
-        { channel, socket: null, pending: [], framesSent: 0, failures: 0, state: null },
+        { channel, socket: null, pending: [], framesSent, failures: 0, state: null },
       ])
     ),
-    segments: [],
-    nextId: 1,
-    classifications: {},
+    segments: [...resumed],
+    nextId: resumed.reduce((highest, segment) => Math.max(highest, segment.id || 0), 0) + 1,
+    classifications: { ...(resume?.classifications || {}) },
     classifyTimers: new Map(),
     classifyQueue: [],
     classifyInFlight: 0,

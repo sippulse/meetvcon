@@ -260,6 +260,16 @@ export function createWorkerCore({
       meetingStartedAt: record.startedAt,
       collaborator: profile,
       captions: record.utterances || [],
+      // Restarting after a stop continues the same timeline and keeps what was
+      // already transcribed, so one call still delivers one transcript.
+      resume:
+        record.liveStreamStartedAt && record.liveSegments?.length
+          ? {
+              streamStartedAt: record.liveStreamStartedAt,
+              segments: record.liveSegments,
+              classifications: record.liveClassifications || {},
+            }
+          : null,
       config: {
         sippulseAiApiKey: config.sippulseAiApiKey,
         typesafeApiKey: config.typesafeApiKey,
@@ -276,7 +286,7 @@ export function createWorkerCore({
         code: result?.code || null,
       };
     }
-    const streamStartedAt = result.streamStartedAt || iso();
+    const streamStartedAt = result.streamStartedAt || record.liveStreamStartedAt || iso();
     await setAiSession(meetingId, { state: "recording", startedAt: iso(), streamStartedAt, tabId });
     await chrome.alarms.clear(OFFSCREEN_CLEANUP_ALARM);
     await storage.setDeliveryStatus({
@@ -290,6 +300,18 @@ export function createWorkerCore({
       classificationEnabled: config.classificationReady,
       liveAnalysis: config.analysis.mode === "live",
     });
+    return { ok: true };
+  }
+
+  // Stop streaming audio without discarding anything: the transcript so far
+  // stays in the meeting record, and starting again resumes it.
+  // ponytail: a call that ends while stopped delivers the live notes instead of
+  // a final report, because the report is written by the recorder at the end.
+  async function stopAiCapture(meetingId) {
+    const session = await getAiSession(meetingId);
+    if (!session) return { ok: true, alreadyStopped: true };
+    await offscreenRequest({ type: "ai_capture_cancel", meetingId });
+    await clearAiSession(meetingId, session);
     return { ok: true };
   }
 
@@ -996,6 +1018,8 @@ export function createWorkerCore({
         return { ok: true };
       case "start_ai_capture":
         return startAiCapture(message.meetingId, message.tabId);
+      case "stop_ai_capture":
+        return stopAiCapture(message.meetingId);
       case "ai_session_result":
         return completeAiSession(message.meetingId, message.result);
       case "ai_tab_ended":
