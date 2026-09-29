@@ -143,11 +143,18 @@
     return names;
   }
 
+  // How many participant tiles the page exposes. Zero means Meet changed its
+  // markup and no name can be read from the tiles at all.
+  function tileCount() {
+    return document.querySelectorAll(TILE_SELECTOR).length;
+  }
+
   ns.selectors = {
     findCaptionsToggleButton,
     findCaptionsOverlay,
     areCaptionsActive,
     isInCall,
     speakingNames,
+    tileCount,
   };
 })();

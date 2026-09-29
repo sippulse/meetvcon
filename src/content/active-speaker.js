@@ -18,6 +18,7 @@
     timer: null,
     events: [],
     open: new Map(), // name -> ms when it started showing audio
+    tiles: 0,
   };
 
   function close(name, startedAt, now) {
@@ -52,7 +53,10 @@
 
   function start() {
     if (state.timer) return;
-    state.timer = setInterval(() => sample(ns.selectors.speakingNames()), SAMPLE_MS);
+    state.timer = setInterval(() => {
+      state.tiles = ns.selectors.tileCount();
+      sample(ns.selectors.speakingNames());
+    }, SAMPLE_MS);
   }
 
   function stop() {
@@ -68,5 +72,10 @@
     state.open.clear();
   }
 
-  ns.activeSpeaker = { start, stop, reset, sample, getEvents };
+  // What the panel shows so a real call can say whether this works at all.
+  function diagnostics() {
+    return { tiles: state.tiles, speaking: [...state.open.keys()], windows: state.events.length };
+  }
+
+  ns.activeSpeaker = { start, stop, reset, sample, getEvents, diagnostics };
 })();

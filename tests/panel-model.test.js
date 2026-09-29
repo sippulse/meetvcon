@@ -162,6 +162,23 @@ test("decisions written as plain strings by an older report still render", () =>
   assert.deepEqual(plain(notes.sections), [{ title: "Decisions", items: ["Piloto em outubro"] }]);
 });
 
+test("the speakers tab says whether the participant tiles are naming anyone", () => {
+  const panelModel = load();
+  const working = panelModel.build(
+    snapshot({ speakerDetection: { tiles: 4, speaking: ["Bruno Lima"], windows: 12 } })
+  ).speakers.detection;
+  assert.equal(working, "4 participant tiles · speaking now: Bruno Lima · 12 turns seen");
+
+  const quiet = panelModel.build(snapshot({ speakerDetection: { tiles: 4, speaking: [], windows: 0 } }));
+  assert.match(quiet.speakers.detection, /speaking now: nobody/);
+
+  // Meet changed its markup: say so instead of silently naming everyone Participant.
+  const broken = panelModel.build(snapshot({ speakerDetection: { tiles: 0, speaking: [], windows: 0 } }));
+  assert.match(broken.speakers.detection, /No participant tiles found/);
+
+  assert.equal(panelModel.build(snapshot()).speakers.detection, "", "nothing to say before sampling starts");
+});
+
 test("speakers show talk share, and the call can be stopped while it runs", () => {
   const panelModel = load();
   const model = panelModel.build(snapshot());

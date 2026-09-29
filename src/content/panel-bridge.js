@@ -71,6 +71,7 @@
       analysisAt: live.analysisAt || null,
       analysisError: live.status?.analysis_status?.error || "",
       transcriptionState: live.status?.transcription_status?.state || "",
+      speakerDetection: ns.activeSpeaker?.diagnostics() || null,
     };
   }
 

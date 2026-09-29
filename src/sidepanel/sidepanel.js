@@ -212,6 +212,7 @@ function renderNotes(view) {
 
 function renderSpeakers(view) {
   if (view.empty) elements.body.append(el("p", "empty", view.empty));
+  if (view.detection) elements.body.append(el("p", "muted", view.detection));
   for (const row of view.rows) {
     const node = el("div", "speaker-row");
     const top = el("div", "speaker-top");

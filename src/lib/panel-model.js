@@ -213,16 +213,31 @@
     };
   }
 
+  // Says out loud whether the participant tiles are naming remote speech, so a
+  // real call answers the question instead of the DevTools console.
+  function speakerDetection(snapshot) {
+    const seen = snapshot.speakerDetection;
+    if (!seen) return "";
+    if (!seen.tiles) {
+      return "No participant tiles found: remote names can only come from Google captions.";
+    }
+    const speaking = list(seen.speaking);
+    const now = speaking.length ? speaking.join(", ") : "nobody";
+    return `${seen.tiles} participant tiles · speaking now: ${now} · ${seen.windows} turns seen`;
+  }
+
   function speakersView(snapshot) {
     const utterances = list(snapshot.utterances);
     const stats = transcription.speakerStats(utterances);
-    if (!stats.length) return { empty: "Talk time appears once people speak.", rows: [] };
+    const detection = speakerDetection(snapshot);
+    if (!stats.length) return { empty: "Talk time appears once people speak.", rows: [], detection };
     const { sentiment } = classification.summarize(utterances, snapshot.classifications || {}, {
       meetingStartedAt: snapshot.meetingStartedAt,
       clock: transcription.clock,
     });
     const mood = new Map(sentiment.map((entry) => [entry.speaker, entry.label]));
     return {
+      detection,
       empty: "",
       rows: stats.map((entry) => {
         const percent = Math.round(entry.talk_share * 100);
